@@ -315,6 +315,7 @@ def scan_semgrep(scan_path: str) -> str:
                 file_summary = defaultdict(
                     lambda: {
                         "severity": None,
+                        "confidence": None,
                         "owasp_tags": set(),
                         "occurrences": [],
                     },
@@ -324,6 +325,7 @@ def scan_semgrep(scan_path: str) -> str:
                     for cwe in issue.get("cwe", ["UNKNOWN"]):
                         data = file_summary[cwe]
                         data["severity"] = issue["severity"]
+                        data["confidence"] = issue["confidence"]
                         data["owasp_tags"].update(issue.get("owasp", []))
                         data["occurrences"].append(
                             {
@@ -575,18 +577,22 @@ def scan_code_quality_security(repo_url: str, subfolder: str = "") -> dict[str, 
         A report of code quality and security issues
     """
     try:
+        logger.info(f"Cloning repository: {repo_url}")
         repo_path = clone_repo(repo_url)
+        logger.info(f"Cloned repository: {repo_path}")
         scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
+        logger.info(f"Scanning path: {scan_path}")
         languages = detect_project_languages(scan_path)
-
+        logger.info(f"Detected languages: {languages}")
         results = {}
 
         # Python code analysis
         if 'python' in languages:
             results["bandit"] = scan_python_bandit(scan_path)
-
+            logger.info("Python code analysis completed")
         # Multi-language analysis
         results["semgrep"] = scan_semgrep(scan_path)
+        logger.info("Semgrep analysis completed")
 
         return results
 
