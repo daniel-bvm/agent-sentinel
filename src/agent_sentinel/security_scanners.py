@@ -329,7 +329,7 @@ def scan_semgrep(scan_path: str) -> str:
                         data["owasp_tags"].update(issue.get("owasp", []))
                         data["occurrences"].append(
                             {
-                                "line": f'{issue["start"]["line"]} - {issue["end"]["line"]}' if issue["start"]["line"] != issue["end"]["line"] else issue["start"]["line"],
+                                "line": f'{issue["start"]["line"]} - {issue["end"]["line"]}' if issue["start"]["line"] != issue["end"]["line"] else str(issue["start"]["line"]),
                                 "message": issue["message"],
                             },
                     )
