@@ -274,15 +274,83 @@ def scan_secrets_trufflehog(scan_path: str) -> dict[str, Any]:
     else:
         return {"error": result["stderr"]}
 
+def cwe_priority(item):
+    severity_order = {"ERROR": 0, "WARNING": 2}
+    confidence_order = {"HIGH": 1, "MEDIUM": 3, "LOW": 4}
+    severity = item[1]["severity"]
+    confidence = item[1]["confidence"]
+    return (
+        severity_order.get(severity, 99),
+        confidence_order.get(confidence, 99)
+    )
 
-def scan_semgrep(scan_path: str) -> dict[str, Any]:
+
+def scan_semgrep(scan_path: str) -> str:
     """Run Semgrep for multi-language security analysis in a given path (repo or subfolder)."""
     cmd = ["semgrep", "--config=auto", "--json", scan_path]
     result = run_command(cmd, cwd=scan_path)
 
     if result["success"]:
         try:
-            return json_repair.loads(result["stdout"])
+            json_result = json_repair.loads(result["stdout"])
+            compact_results = [
+                {
+                    "path": result["path"],
+                    "cwe": result["extra"]["metadata"]["cwe"],
+                    "message": result["extra"]["message"],
+                    "owasp": result["extra"]["metadata"]["owasp"],
+                    "confidence": result["extra"]["metadata"]["confidence"],
+                    "severity": result["extra"]["severity"],
+                    "start": result["start"],
+                    "end": result["end"],
+                }
+                for result in json_result["results"]
+            ]
+            grouped_results = defaultdict(list)
+            for result in compact_results:
+                grouped_results[result["path"]].append(result)
+
+            summary = {}
+            for filepath, issues in grouped_results.items():
+                file_summary = defaultdict(
+                    lambda: {
+                        "severity": None,
+                        "owasp_tags": set(),
+                        "occurrences": [],
+                    },
+                )
+
+                for issue in issues:
+                    for cwe in issue.get("cwe", ["UNKNOWN"]):
+                        data = file_summary[cwe]
+                        data["severity"] = issue["severity"]
+                        data["owasp_tags"].update(issue.get("owasp", []))
+                        data["occurrences"].append(
+                            {
+                                "line": f'{issue["start"]["line"]} - {issue["end"]["line"]}' if issue["start"]["line"] != issue["end"]["line"] else issue["start"]["line"],
+                                "message": issue["message"],
+                            },
+                    )
+
+                for cwe in file_summary:
+                    file_summary[cwe]["owasp_tags"] = list(file_summary[cwe]["owasp_tags"])
+                summary[filepath] = dict(sorted(file_summary.items(), key=cwe_priority))
+
+            summary_str = ""
+            for filepath, cwe_dict in summary.items():
+                summary_str += f"\n📄 File: {filepath}\n"
+                for cwe, data in cwe_dict.items():
+                    summary_str += f"  🔐 CWE: {cwe}\n"
+                    summary_str += f"     • Severity: {data['severity']}\n"
+                    summary_str += f"     • Confidence: {data['confidence']}\n"
+                    summary_str += f"     • OWASP Tags: {', '.join(sorted(data['owasp_tags']))}\n"
+                    summary_str += f"     • Occurrences:\n"
+                    for occ in sorted(data["occurrences"], key=lambda x: x["line"]):
+                        summary_str += f"         - Line {occ['line']}: {occ['message']}\n"
+
+            return summary_str
+
+
         except json.JSONDecodeError:
             return {"error": "Failed to parse Semgrep output"}
     else:
