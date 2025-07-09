@@ -95,7 +95,7 @@ def scan_python_bandit(scan_path: str) -> dict[str, Any]:
 
     if result["success"]:
         try:
-            return json.loads(result["stdout"])
+            return json_repair.loads(result["stdout"])
         except json.JSONDecodeError:
             return {"error": "Failed to parse Bandit output"}
     else:
@@ -117,7 +117,7 @@ def scan_npm_audit(scan_path: str) -> dict[str, Any]:
         return {"error": audit_result["stderr"]}
 
     try:
-        audit_data = json.loads(audit_result["stdout"])
+        audit_data = json_repair.loads(audit_result["stdout"])
         advisories = audit_data.get("advisories", {})
 
         # Convert to Safety-like structure
@@ -267,7 +267,7 @@ def scan_secrets_trufflehog(scan_path: str) -> dict[str, Any]:
         for line in result["stdout"].split('\n'):
             if line.strip():
                 try:
-                    secrets.append(json.loads(line))
+                    secrets.append(json_repair.loads(line))
                 except json.JSONDecodeError:
                     continue
         return {"secrets": secrets}
@@ -282,7 +282,7 @@ def scan_semgrep(scan_path: str) -> dict[str, Any]:
 
     if result["success"]:
         try:
-            return json.loads(result["stdout"])
+            return json_repair.loads(result["stdout"])
         except json.JSONDecodeError:
             return {"error": "Failed to parse Semgrep output"}
     else:
