@@ -1,0 +1,7 @@
+{
+    "command": "agent-sentinel",
+    "args": [],
+    "env": {
+        "GITHUB_ACCESS_TOKEN": ""
+    }
+}
