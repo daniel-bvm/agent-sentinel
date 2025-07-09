@@ -198,3 +198,7 @@ agent-graphiti/
 curl_*.txt
 *.zip
 messages.json
+
+src/tests/
+*.json
+!config.json

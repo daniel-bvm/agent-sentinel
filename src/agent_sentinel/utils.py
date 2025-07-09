@@ -2,7 +2,6 @@
 
 import os
 import subprocess
-import tempfile
 import logging
 import tomlkit
 from typing import Any
