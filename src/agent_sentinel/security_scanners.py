@@ -202,18 +202,17 @@ def scan_solidity_slither(scan_path: str) -> dict[str, Any]:
 
     # 3. Run Slither
     slither_output = os.path.join(scan_path, "slither-output.json")
+    if os.path.exists(slither_output):
+        os.remove(slither_output)
     result = run_command(["slither", ".", "--json", slither_output], cwd=scan_path)
 
-    if not result["success"]:
-        return {"error": f"Slither failed:\n{result['stderr']}"}
-
-    if not os.path.isfile(slither_output):
+    if not os.path.exists(slither_output):
         return {"error": f"Slither did not generate output file.\nSTDERR:\n{result['stderr']}"}
 
     # 4. Convert to Safety-style JSON and analyze
     try:
         with open(slither_output, "r") as f:
-            slither_data = json.load(f)
+            slither_data = json_repair.load(f)
 
         detectors = slither_data.get("results", {}).get("detectors", [])
         fake_safety_data = {
