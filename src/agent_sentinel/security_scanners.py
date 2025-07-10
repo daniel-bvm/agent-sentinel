@@ -390,16 +390,16 @@ def scan_semgrep(scan_path: str) -> str:
             json_result = json_repair.loads(result["stdout"])
             compact_results = [
                 {
-                    "path": clean_file_path(result["path"], scan_path),
-                    "cwe": result["extra"]["metadata"]["cwe"],
-                    "message": result["extra"]["message"],
-                    "owasp": result["extra"]["metadata"]["owasp"],
-                    "confidence": result["extra"]["metadata"]["confidence"],
-                    "severity": result["extra"]["severity"],
-                    "start": result["start"],
-                    "end": result["end"],
+                    "path": clean_file_path(individual_result["path"], scan_path),
+                    "cwe": individual_result.get("extra", {}).get("metadata", {}).get("cwe", "UNKNOWN"),
+                    "message": individual_result.get("extra", {}).get("message", "UNKNOWN"),
+                    "owasp": individual_result.get("extra", {}).get("metadata", {}).get("owasp", "UNKNOWN"),
+                    "confidence": individual_result.get("extra", {}).get("metadata", {}).get("confidence", "UNKNOWN"),
+                    "severity": individual_result.get("extra", {}).get("severity", "UNKNOWN"),
+                    "start": individual_result.get("start", "No line number"),
+                    "end": individual_result.get("end", "No line number"),
                 }
-                for result in json_result["results"]
+                for individual_result in json_result["results"]
             ]
             grouped_results = defaultdict(list)
             for result in compact_results:
@@ -651,12 +651,15 @@ def scan_dependencies_vulnerabilities(repo_url: str, subfolder: str = "") -> dic
         results = {}
 
         # Python dependencies
-        if 'python' in languages:
+        if "python" in languages:
             results["python"] = scan_dependencies_safety(scan_path)
             logger.info("Python dependencies scanned with Safety")
-        if 'javascript' in languages:
+        if "javascript" in languages:
             results["javascript"] = scan_npm_audit(scan_path)
             logger.info("JavaScript dependencies scanned with npm audit")
+        if "solidity" in languages:
+            results["solidity"] = scan_solidity_slither(scan_path)
+            logger.info("Solidity dependencies scanned with Slither")
 
         return results
 
