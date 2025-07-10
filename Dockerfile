@@ -9,11 +9,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     tar \
     wget \
+    python3-pip \
     nodejs \
     npm && \
     rm -rf /var/lib/apt/lists/*
 
-# --- Install Node.js 20 (if not already available in base image) ---
+# --- Install Node.js 20 ---
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y nodejs && \
     node -v && npm -v
@@ -27,10 +28,13 @@ RUN export GITLEAKS_VERSION=$(curl -s "https://api.github.com/repos/gitleaks/git
     chmod +x /usr/local/bin/gitleaks && \
     rm gitleaks.tar.gz
 
-# Add Foundry (optional, uncomment if needed)
-# RUN curl -L https://foundry.paradigm.xyz | bash && \
-#     /root/.foundry/bin/foundryup
+# --- Install Foundry ---
+RUN curl -L https://foundry.paradigm.xyz | bash && \
+    /root/.foundry/bin/foundryup
 ENV PATH="/root/.foundry/bin:$PATH"
+
+# --- Install Slither ---
+RUN pip install slither-analyzer
 
 # Set working directory
 WORKDIR /app
