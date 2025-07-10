@@ -284,6 +284,9 @@ def scan_dependencies_safety(scan_path: str) -> dict[str, Any]:
     return results
 
 
+# TODO: Remove this function
+# TruffleHog is good, but it requires the scan_path to be a valid repository
+# and it takes a long time to run.
 def scan_secrets_trufflehog(scan_path: str) -> dict[str, Any]:
     """Run TruffleHog for secret detection in a given path (repo or subfolder)."""
     cmd = ["trufflehog", "filesystem", "--json", scan_path]
@@ -310,6 +313,61 @@ def scan_secrets_trufflehog(scan_path: str) -> dict[str, Any]:
         return {"secrets": secrets}
     else:
         return {"error": result["stderr"]}
+
+
+def scan_secrets_with_gitleaks(scan_path: str) -> str:
+    """Run Gitleaks for secret detection in a given path (repo or subfolder)."""
+    output_path = os.path.join(scan_path, "gitleaks_report.json")
+    if os.path.exists(output_path):
+        os.remove(output_path)
+    cmd = [
+        "gitleaks",
+        "detect",
+        "--source",
+        scan_path,
+        "--no-git",
+        "--report-format",
+        "json",
+        "--report-path",
+        output_path,
+    ]
+    run_command(cmd, cwd=scan_path)
+
+    if not os.path.exists(output_path):
+        return {"error": "Gitleaks did not generate output file."}
+
+    data = defaultdict(list)
+    with open(output_path, "r") as f:
+        json_data = json_repair.load(f)
+    for item in json_data:
+        # Skip .env files
+        if (
+            ".env" in item["File"]
+            and (
+                not ".env.template" in item["File"]
+                or not ".env.example" in item["File"]
+            )
+        ):
+            continue
+        data[clean_file_path(item["File"], scan_path)].append({
+            "description": item["Description"],
+            "line": f"{item['StartLine']} - {item['EndLine']}",
+            "match": item["Match"],
+            "secret": item["Secret"],
+        })
+
+    string_result = ""
+    for file, issues in data.items():
+        string_result += f"\nFile: {file}\n"
+        for issue in issues:
+            string_result += f"Line: {issue['line']}\n"
+            string_result += f"Secret: {issue['secret']}\n"
+            string_result += f"Description: {issue['description']}\n"
+            # string_result += f"Match: {issue['match']}\n"
+            string_result += f"\n"
+
+    return string_result
+
 
 def cwe_priority(item):
     severity_order = {"ERROR": 0, "WARNING": 2}
@@ -523,7 +581,7 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str,
 
         # Run general security scans
         logger.info("Running general security scans...")
-        results["scan_results"]["secrets"] = scan_secrets_trufflehog(scan_path)
+        results["scan_results"]["secrets"] = scan_secrets_with_gitleaks(scan_path)
         results["scan_results"]["semgrep"] = scan_semgrep(scan_path)
         results["scan_results"]["dockerfile"] = scan_dockerfile_security(scan_path)
         results["scan_results"]["github_actions"] = analyze_github_actions_security(scan_path)
@@ -566,7 +624,7 @@ def scan_for_secrets(repo_url: str, subfolder: str = "") -> dict[str, Any]:
     try:
         repo_path = clone_repo(repo_url)
         scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
-        return scan_secrets_trufflehog(scan_path)
+        return scan_secrets_with_gitleaks(scan_path)
     except Exception as e:
         return {"error": f"Failed to scan for secrets: {str(e)}"}
 

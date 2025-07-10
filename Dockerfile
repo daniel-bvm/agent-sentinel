@@ -1,37 +1,45 @@
 FROM nikolasigmoid/py-mcp-proxy:latest
 
-# Install basic packages
-RUN apt-get update && apt-get install -y \
+# Install essential packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     gnupg \
-    unzip
-# RUN apt-get update && apt-get install -y gcc libc-dev
+    unzip \
+    ca-certificates \
+    tar \
+    wget \
+    nodejs \
+    npm && \
+    rm -rf /var/lib/apt/lists/*
 
-# # Install solc manually (v0.8.20 as example)
-# RUN curl -L -o /usr/bin/solc https://github.com/ethereum/solidity/releases/download/v0.8.20/solc-static-linux && \
-#     chmod +x /usr/bin/solc && \
-#     solc --version
+# --- Install Node.js 20 (if not already available in base image) ---
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
+    node -v && npm -v
 
-# --- Install Node.js + npm ---
-RUN apt-get update && \
-    apt-get install -y curl gnupg && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs
+# --- Install Gitleaks (latest release) ---
+RUN export GITLEAKS_VERSION=$(curl -s "https://api.github.com/repos/gitleaks/gitleaks/releases/latest" \
+    | grep -Po '"tag_name": "v\K[0-9.]+') && \
+    wget -qO gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz && \
+    tar -xzf gitleaks.tar.gz && \
+    mv gitleaks /usr/local/bin/gitleaks && \
+    chmod +x /usr/local/bin/gitleaks && \
+    rm gitleaks.tar.gz
 
-# Verify install
-RUN node -v && npm -v
-
-# # --- Install Foundry (forge CLI) ---
+# Add Foundry (optional, uncomment if needed)
 # RUN curl -L https://foundry.paradigm.xyz | bash && \
-#     ~/.foundry/bin/foundryup
-
-# Add forge to PATH
+#     /root/.foundry/bin/foundryup
 ENV PATH="/root/.foundry/bin:$PATH"
 
+# Set working directory
+WORKDIR /app
+
+# Copy project files
 COPY pyproject.toml pyproject.toml
 COPY src src
 COPY config.json config.json
 COPY system_prompt.txt system_prompt.txt
 
-RUN pip install . && rm -rf pyproject.toml
+# Install Python package
+RUN pip install . && rm -f pyproject.toml
