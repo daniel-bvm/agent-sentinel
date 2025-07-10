@@ -2,7 +2,7 @@
 
 # Build the Docker image
 echo "Building Docker image..."
-docker build -t sentinel .
+podman build -t sentinel .
 
 if [ $? -ne 0 ]; then
     echo "Docker build failed!"
@@ -11,7 +11,7 @@ fi
 
 # Remove existing container if it exists
 echo "Removing existing container..."
-docker rm -f sentinel || true
+podman rm -f sentinel || true
 
 # Check if .env file exists, create empty one if not
 if [ ! -f .env ]; then
@@ -21,7 +21,7 @@ fi
 
 # Run the container
 echo "Starting container..."
-docker run --rm -it -p 4000:80 \
+podman run --rm -it -p 4000:80 \
 --env-file .env \
 -v "$(pwd)/data:/storage" -v ./:/workspace \
 --name sentinel \

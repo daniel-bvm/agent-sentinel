@@ -3,6 +3,7 @@
 import os
 import json
 import logging
+
 from typing import Any
 from .utils import run_command, detect_project_languages, patch_foundry_config
 import json_repair
@@ -10,6 +11,24 @@ from collections import defaultdict
 from .git_utils import clone_repo
 
 logger = logging.getLogger(__name__)
+
+
+def clean_file_path(file_path: str, repo_path: str) -> str:
+    """
+    Clean file path by removing the base repository path pattern.
+
+    Args:
+        file_path: The full file path to clean
+        repo_path: The repository path to remove from the file path
+
+    Returns:
+        Cleaned relative file path
+    """
+    if file_path.startswith(repo_path):
+        # Remove the repo path and any leading slash
+        cleaned = file_path[len(repo_path):].lstrip('/')
+        return cleaned if cleaned else file_path
+    return file_path
 
 
 def analyze_dependency_report(json_path: str) -> dict:
@@ -95,7 +114,13 @@ def scan_python_bandit(scan_path: str) -> dict[str, Any]:
 
     if result["success"]:
         try:
-            return json_repair.loads(result["stdout"])
+            bandit_result = json_repair.loads(result["stdout"])
+            # Clean file paths in the bandit results
+            if isinstance(bandit_result, dict) and "results" in bandit_result:
+                for issue in bandit_result["results"]:
+                    if isinstance(issue, dict) and "filename" in issue:
+                        issue["filename"] = clean_file_path(issue["filename"], scan_path)
+            return bandit_result
         except json.JSONDecodeError:
             return {"error": "Failed to parse Bandit output"}
     else:
@@ -242,16 +267,18 @@ def scan_dependencies_safety(scan_path: str) -> dict[str, Any]:
 
         result = run_command(cmd, cwd=os.path.dirname(req_file))
         try:
-            results[req_file] = json_repair.loads(result["stdout"]) if result["success"] else {"error": result["stderr"]}
+            cleaned_req_file = clean_file_path(req_file, scan_path)
+            results[cleaned_req_file] = json_repair.loads(result["stdout"]) if result["success"] else {"error": result["stderr"]}
             with open(os.path.join(scan_path, "safety_output.json"), "w") as f:
-                json.dump(results[req_file], f, indent=4)
-            results[req_file] = analyze_dependency_report(os.path.join(scan_path, "safety_output.json"))
-            # Remove the temporary file after analysis
+                json.dump(results[cleaned_req_file], f, indent=4)
+            results[cleaned_req_file] = analyze_dependency_report(os.path.join(scan_path, "safety_output.json"))
             os.remove(os.path.join(scan_path, "safety_output.json"))
         except FileNotFoundError:
-            results[req_file] = {"error": "Safety output file not found"}
+            cleaned_req_file = clean_file_path(req_file, scan_path)
+            results[cleaned_req_file] = {"error": "Safety output file not found"}
         except json.JSONDecodeError:
-            results[req_file] = {"error": "Failed to parse Safety output"}
+            cleaned_req_file = clean_file_path(req_file, scan_path)
+            results[cleaned_req_file] = {"error": "Failed to parse Safety output"}
             return results
 
     return results
@@ -267,7 +294,17 @@ def scan_secrets_trufflehog(scan_path: str) -> dict[str, Any]:
         for line in result["stdout"].split('\n'):
             if line.strip():
                 try:
-                    secrets.append(json_repair.loads(line))
+                    secret = json_repair.loads(line)
+                    # Clean file paths in the secret data
+                    if isinstance(secret, dict) and "SourceMetadata" in secret:
+                        source_meta = secret["SourceMetadata"]
+                        if isinstance(source_meta, dict) and "Data" in source_meta:
+                            data = source_meta["Data"]
+                            if isinstance(data, dict) and "Filesystem" in data:
+                                filesystem = data["Filesystem"]
+                                if isinstance(filesystem, dict) and "file" in filesystem:
+                                    filesystem["file"] = clean_file_path(filesystem["file"], scan_path)
+                    secrets.append(secret)
                 except json.JSONDecodeError:
                     continue
         return {"secrets": secrets}
@@ -295,7 +332,7 @@ def scan_semgrep(scan_path: str) -> str:
             json_result = json_repair.loads(result["stdout"])
             compact_results = [
                 {
-                    "path": result["path"],
+                    "path": clean_file_path(result["path"], scan_path),
                     "cwe": result["extra"]["metadata"]["cwe"],
                     "message": result["extra"]["message"],
                     "owasp": result["extra"]["metadata"]["owasp"],
@@ -389,12 +426,14 @@ def scan_dockerfile_security(scan_path: str) -> dict[str, Any]:
                 if 'chmod 777' in content:
                     issues.append("Overly permissive file permissions")
 
-                results[dockerfile] = {
+                cleaned_path = clean_file_path(dockerfile, scan_path)
+                results[cleaned_path] = {
                     "issues": issues,
                     "content_length": len(content)
                 }
         except Exception as e:
-            results[dockerfile] = {"error": str(e)}
+            cleaned_path = clean_file_path(dockerfile, scan_path)
+            results[cleaned_path] = {"error": str(e)}
 
     return results
 
@@ -425,12 +464,14 @@ def analyze_github_actions_security(scan_path: str) -> dict[str, Any]:
                     if '${' in content:
                         issues.append("Potential shell injection vulnerability")
 
-                    results[file] = {
+                    cleaned_path = clean_file_path(file_path, scan_path)
+                    results[cleaned_path] = {
                         "issues": issues,
                         "content_length": len(content)
                     }
             except Exception as e:
-                results[file] = {"error": str(e)}
+                cleaned_path = clean_file_path(file_path, scan_path)
+                results[cleaned_path] = {"error": str(e)}
 
     return results
 
