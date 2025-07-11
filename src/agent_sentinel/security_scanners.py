@@ -3,6 +3,7 @@
 import os
 import json
 import logging
+import re
 
 from typing import Any
 from .utils import run_command, detect_project_languages, patch_foundry_config
@@ -129,9 +130,18 @@ def scan_python_bandit(scan_path: str) -> dict[str, Any]:
 
 def scan_npm_audit(scan_path: str) -> dict[str, Any]:
     """Run npm audit and format output to be compatible with analyze_dependency_report()."""
-    package_json = os.path.join(scan_path, "package.json")
-    if not os.path.isfile(package_json):
+    package_json_path = None
+    for root, dirs, files in os.walk(scan_path):
+        for file in files:
+            if file == "package.json":
+                package_json_path = os.path.join(root, file)
+                break
+    if not package_json_path:
         return {"error": "No package.json found"}
+
+    logger.info(f"package.json found at: {package_json_path}")
+    scan_path = os.path.dirname(package_json_path)
+    logger.info(f"scan_path: {scan_path}")
 
     install_result = run_command(["npm", "install", "--ignore-scripts"], cwd=scan_path)
     if not install_result["success"]:
@@ -251,7 +261,11 @@ def scan_dependencies_safety(scan_path: str) -> dict[str, Any]:
     req_files = []
     for root, dirs, files in os.walk(scan_path):
         for file in files:
-            if file in ['requirements.txt', 'requirements-dev.txt', 'Pipfile', 'pyproject.toml']:
+            if (
+                file in ['requirements.txt', 'Pipfile', 'pyproject.toml']
+                or re.match(r'requirements-.*\.txt', file)
+                or re.match(r'requirements_.*\.txt', file)
+            ):
                 req_files.append(os.path.join(root, file))
 
     if not req_files:
@@ -490,8 +504,8 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str,
 
         # Run Python-specific scans
         if 'python' in languages:
-            logger.info("Running Python security scans...")
-            results["scan_results"]["bandit"] = scan_python_bandit(scan_path)
+            logger.info("Running Python dependency scans...")
+            # results["scan_results"]["bandit"] = scan_python_bandit(scan_path)
             results["scan_results"]["safety"] = scan_dependencies_safety(scan_path)
         if 'javascript' in languages:
             results["scan_results"]["npm_audit"] = scan_npm_audit(scan_path)
@@ -499,7 +513,7 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str,
             results["scan_results"]["slither"] = scan_solidity_slither(scan_path)
 
         # Run general security scans
-        logger.info("Running general security scans...")
+        logger.info("Running general security scans (secrets, semgrep)...")
         results["scan_results"]["secrets"] = scan_secrets_with_gitleaks(scan_path)
         results["scan_results"]["semgrep"] = scan_semgrep(scan_path)
 
