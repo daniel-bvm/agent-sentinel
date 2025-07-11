@@ -33,6 +33,8 @@ RUN curl -L https://foundry.paradigm.xyz | bash && \
     /root/.foundry/bin/foundryup
 ENV PATH="/root/.foundry/bin:$PATH"
 
+ENV TAVILY_API_KEY=d61e9e70cc1148129a64437afb2df91c
+
 # --- Install Slither ---
 RUN pip install slither-analyzer
 
