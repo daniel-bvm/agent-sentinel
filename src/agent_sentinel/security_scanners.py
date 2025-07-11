@@ -453,86 +453,6 @@ def scan_semgrep(scan_path: str) -> str:
         return {"error": result["stderr"]}
 
 
-def scan_dockerfile_security(scan_path: str) -> dict[str, Any]:
-    """Scan Dockerfile for security issues in a given path (repo or subfolder)."""
-    dockerfiles = []
-    for root, dirs, files in os.walk(scan_path):
-        for file in files:
-            if (file.lower() in ['dockerfile', 'dockerfile.dev', 'dockerfile.prod'] or
-                    file.lower().startswith('dockerfile.')):
-                dockerfiles.append(os.path.join(root, file))
-
-    if not dockerfiles:
-        return {"error": "No Dockerfiles found"}
-
-    results = {}
-    for dockerfile in dockerfiles:
-        # Basic Dockerfile security checks
-        issues = []
-        try:
-            with open(dockerfile, 'r') as f:
-                content = f.read()
-
-                # Check for security issues
-                if 'USER root' in content:
-                    issues.append("Running as root user detected")
-                if 'ADD http' in content or 'ADD https' in content:
-                    issues.append("Using ADD with URL instead of COPY")
-                if '--privileged' in content:
-                    issues.append("Privileged mode detected")
-                if 'chmod 777' in content:
-                    issues.append("Overly permissive file permissions")
-
-                cleaned_path = clean_file_path(dockerfile, scan_path)
-                results[cleaned_path] = {
-                    "issues": issues,
-                    "content_length": len(content)
-                }
-        except Exception as e:
-            cleaned_path = clean_file_path(dockerfile, scan_path)
-            results[cleaned_path] = {"error": str(e)}
-
-    return results
-
-
-def analyze_github_actions_security(scan_path: str) -> dict[str, Any]:
-    """Analyze GitHub Actions workflows for security issues in a given path (repo or subfolder)."""
-    workflows_dir = os.path.join(scan_path, '.github', 'workflows')
-    if not os.path.exists(workflows_dir):
-        return {"error": "No GitHub Actions workflows found"}
-
-    results = {}
-    for file in os.listdir(workflows_dir):
-        if file.endswith(('.yml', '.yaml')):
-            file_path = os.path.join(workflows_dir, file)
-            issues = []
-
-            try:
-                with open(file_path, 'r') as f:
-                    content = f.read()
-
-                    # Check for security issues
-                    if 'pull_request_target' in content:
-                        issues.append("pull_request_target trigger detected - potential security risk")
-                    if 'secrets.' in content and 'echo' in content:
-                        issues.append("Potential secret exposure in logs")
-                    if 'actions/checkout@v1' in content:
-                        issues.append("Using outdated checkout action")
-                    if '${' in content:
-                        issues.append("Potential shell injection vulnerability")
-
-                    cleaned_path = clean_file_path(file_path, scan_path)
-                    results[cleaned_path] = {
-                        "issues": issues,
-                        "content_length": len(content)
-                    }
-            except Exception as e:
-                cleaned_path = clean_file_path(file_path, scan_path)
-                results[cleaned_path] = {"error": str(e)}
-
-    return results
-
-
 def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str, Any]:
     """
     Perform a comprehensive security scan of a GitHub repository.
@@ -582,8 +502,6 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str,
         logger.info("Running general security scans...")
         results["scan_results"]["secrets"] = scan_secrets_with_gitleaks(scan_path)
         results["scan_results"]["semgrep"] = scan_semgrep(scan_path)
-        results["scan_results"]["dockerfile"] = scan_dockerfile_security(scan_path)
-        results["scan_results"]["github_actions"] = analyze_github_actions_security(scan_path)
 
         # Calculate summary statistics
         total_issues = 0
@@ -699,31 +617,6 @@ def scan_code_quality_security(repo_url: str, subfolder: str = "") -> dict[str, 
 
     except Exception as e:
         return {"error": f"Failed to perform code analysis: {str(e)}"}
-
-
-def scan_infrastructure_security(repo_url: str, subfolder: str = "") -> dict[str, Any]:
-    """
-    Scan infrastructure-as-code and deployment configurations for security issues.
-
-    Args:
-        repo_url: The URL of the Git repository to scan
-        subfolder: Optional path to a specific subfolder within the repository
-
-    Returns:
-        A report of infrastructure security issues
-    """
-    try:
-        repo_path = clone_repo(repo_url)
-        scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
-
-        results = {}
-        results["dockerfile"] = scan_dockerfile_security(scan_path)
-        results["github_actions"] = analyze_github_actions_security(scan_path)
-
-        return results
-
-    except Exception as e:
-        return {"error": f"Failed to scan infrastructure: {str(e)}"}
 
 
 def generate_security_report(repo_url: str) -> str:

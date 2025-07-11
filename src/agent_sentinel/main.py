@@ -151,21 +151,6 @@ def scan_code_quality_security(repo_url: str, subfolder: str = "") -> dict[str, 
 
 
 @mcp.tool()
-def scan_infrastructure_security(repo_url: str, subfolder: str = "") -> dict[str, Any]:
-    """
-    Scan infrastructure-as-code and deployment configurations for security issues.
-
-    Args:
-        repo_url: The URL of the Git repository to scan
-        subfolder: Optional path to a specific subfolder within the repository
-
-    Returns:
-        A report of infrastructure security issues
-    """
-    return security_scanners.scan_infrastructure_security(repo_url, subfolder)
-
-
-@mcp.tool()
 def generate_security_report(repo_url: str) -> str:
     """
     Generate a comprehensive security report for a GitHub repository.
