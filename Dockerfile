@@ -62,7 +62,7 @@ COPY system_prompt.txt system_prompt.txt
 RUN pip install . && rm -f pyproject.toml
 
 # --- Create non-root user and switch ---
-    RUN useradd -m -d /home/sonaruser -s /bin/bash sonaruser && \
-    chown -R sonaruser:sonaruser /opt/sonarqube
+RUN useradd -m -d /home/sonaruser -s /bin/bash sonaruser && \
+    chown -R sonaruser:sonaruser /opt/sonarqube /opt/sonar-scanner /app
 
 USER sonaruser

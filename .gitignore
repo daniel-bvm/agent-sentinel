@@ -202,3 +202,5 @@ messages.json
 src/tests/
 *.json
 !config.json
+
+.scannerwork/
