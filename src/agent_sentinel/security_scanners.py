@@ -10,6 +10,7 @@ from .utils import run_command, detect_project_languages, patch_foundry_config
 import json_repair
 from collections import defaultdict
 from .git_utils import clone_repo
+from .sonarqube_utils import scan_project_with_sonar_scanner
 
 logger = logging.getLogger(__name__)
 
@@ -297,7 +298,7 @@ def scan_dependencies_safety(scan_path: str) -> dict[str, Any]:
     return results
 
 
-# TODO: Remove this function
+# TODO: Integrate this function
 # TruffleHog is good, but it requires the scan_path to be a valid repository
 # and it takes a long time to run.
 def scan_secrets_trufflehog(scan_path: str) -> dict[str, Any]:
@@ -328,6 +329,7 @@ def scan_secrets_trufflehog(scan_path: str) -> dict[str, Any]:
         return {"error": result["stderr"]}
 
 
+# TODO: Remove this function because GitLeaks does not check the Git history
 def scan_secrets_with_gitleaks(scan_path: str) -> str:
     """Run Gitleaks for secret detection in a given path (repo or subfolder)."""
     output_path = os.path.join(scan_path, "gitleaks_report.json")
@@ -516,6 +518,10 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str,
         logger.info("Running general security scans (secrets, semgrep)...")
         results["scan_results"]["secrets"] = scan_secrets_with_gitleaks(scan_path)
         results["scan_results"]["semgrep"] = scan_semgrep(scan_path)
+        logger.info("Finish running general security scans (secrets, semgrep)")
+        logger.info("Running Sonar Scanner...")
+        results["scan_results"]["sonar_scanner"] = scan_project_with_sonar_scanner(scan_path)
+        logger.info("Finish running Sonar Scanner")
 
         # Calculate summary statistics
         total_issues = 0
@@ -525,7 +531,8 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str,
             total_issues += len(results["scan_results"]["secrets"]["secrets"])
         if "semgrep" in results["scan_results"] and "results" in results["scan_results"]["semgrep"]:
             total_issues += len(results["scan_results"]["semgrep"]["results"])
-
+        if "sonar_scanner" in results["scan_results"] and "issues" in results["scan_results"]["sonar_scanner"]:
+            total_issues += len(results["scan_results"]["sonar_scanner"]["issues"])
         results["summary"]["total_issues"] = total_issues
 
         # Serialize to JSON and truncate if needed
@@ -626,6 +633,10 @@ def scan_code_quality_security(repo_url: str, subfolder: str = "") -> dict[str, 
         # Multi-language analysis
         results["semgrep"] = scan_semgrep(scan_path)
         logger.info("Semgrep analysis completed")
+        logger.info("Running Sonar Scanner...")
+        results["sonar_scanner"] = scan_project_with_sonar_scanner(scan_path)
+        logger.info("Finish running Sonar Scanner")
+        logger.info("Sonar Scanner analysis completed")
 
         return results
 
