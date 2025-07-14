@@ -33,10 +33,6 @@ def _wait_for_sonarqube_to_start():
         data = response.json()
         if data["status"] == "UP":
             return True
-        elif data["status"] == "STARTING":
-            return False
-        else:
-            return False
     return False
 
 
