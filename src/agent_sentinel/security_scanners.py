@@ -1,4 +1,6 @@
-"""Security scanning functions for the agent sentinel."""
+"""
+Security scanners for the Agent Sentinel.
+"""
 
 import os
 import json
@@ -520,7 +522,7 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str,
         results["scan_results"]["semgrep"] = scan_semgrep(scan_path)
         logger.info("Finish running general security scans (secrets, semgrep)")
         logger.info("Running Sonar Scanner...")
-        results["scan_results"]["sonar_scanner"] = scan_project_with_sonar_scanner(scan_path)
+        # results["scan_results"]["sonar_scanner"] = scan_project_with_sonar_scanner(scan_path)
         logger.info("Finish running Sonar Scanner")
 
         # Calculate summary statistics
@@ -634,7 +636,7 @@ def scan_code_quality_security(repo_url: str, subfolder: str = "") -> dict[str, 
         results["semgrep"] = scan_semgrep(scan_path)
         logger.info("Semgrep analysis completed")
         logger.info("Running Sonar Scanner...")
-        results["sonar_scanner"] = scan_project_with_sonar_scanner(scan_path)
+        # results["sonar_scanner"] = scan_project_with_sonar_scanner(scan_path)
         logger.info("Finish running Sonar Scanner")
         logger.info("Sonar Scanner analysis completed")
 

@@ -20,7 +20,6 @@ SONAR_SCANNER_CONFIG_FILE = "/opt/sonar-scanner/conf/sonar-scanner.properties"
 SONARQUBE_URL = "http://localhost:9000"
 SONARQUBE_USER = "admin"
 SONARQUBE_PASSWORD = "admin"
-# SONARQUBE_PASSWORD = "12345678"
 SONAR_SCANNER_OUTPUT_DIR = "/tmp/sonar-scanner-output"
 
 def _run_with_live_output(cmd):
@@ -106,17 +105,6 @@ def _get_sonarqube_token(
     except Exception as e:
         logger.error(f"Error getting SonarQube token: {e}")
     return ""
-
-
-def _parse_url_result_from_sonar_scanner(sonar_scanner_output: str) -> str:
-    """Parse the URL result from the Sonar Scanner output.
-
-    URL will have the form:
-    http://localhost:9000/api/ce/task?id=<task_id>
-    """
-    # Extract the task_id from the URL
-    match = re.search(r"/api/ce/task\?id=([^&\s]+)", sonar_scanner_output)
-    return f"{SONARQUBE_URL}/api/ce/task?id={match.group(1)}" if match else ""
 
 
 def _get_sonar_scanner_result(project_key: str) -> dict:
@@ -245,19 +233,3 @@ def scan_project_with_sonar_scanner(project_path: str) -> dict:
 
     return summary
 
-
-if __name__ == "__main__":
-    # txt_path = "/Users/macbookpro/Projects/agent-sentinel/.tmp/scanner_output.txt"
-    # with open(txt_path, "r") as f:
-    #     sonar_scanner_output = f.read()
-    # # print(sonar_scanner_output)
-    # print(_parse_url_result_from_sonar_scanner(sonar_scanner_output))
-    # print(_get_sonarqube_token())
-    # print(os.environ["SONARQUBE_TOKEN"])
-    # data = _get_sonar_scanner_result("myproject-hehe")
-    # with open("./.tmp/sonar_scanner_result.json", "w") as f:
-    #     json.dump(data, f)
-    # summary = _summarize_sonar_scanner_result("./.tmp/sonar_scanner_result.json")
-    # print(summary)
-    # print(f"Total issues: {summary['total']}, {len(summary['issues'])}")
-    _write_sonar_scanner_config()
