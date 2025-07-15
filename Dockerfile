@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     npm \
     jq \
     procps \
+    xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Java config ---
@@ -52,6 +53,14 @@ RUN curl -LO https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-$
     mv sonarqube-${SONAR_VERSION} /opt/sonarqube && \
     rm sonarqube-${SONAR_VERSION}.zip
 
+# --- Install CodeQL CLI ---
+ENV CODEQL_VERSION="2.15.5"
+RUN curl -L -o codeql.tar.gz https://github.com/github/codeql-cli-binaries/releases/download/v${CODEQL_VERSION}/codeql-linux64.tar.gz && \
+    tar -xzf codeql.tar.gz && \
+    mv codeql /opt/codeql && \
+    ln -s /opt/codeql/codeql /usr/local/bin/codeql && \
+    rm codeql.tar.gz
+
 WORKDIR /app
 
 COPY pyproject.toml pyproject.toml
@@ -60,9 +69,3 @@ COPY config.json config.json
 COPY system_prompt.txt system_prompt.txt
 
 RUN pip install . && rm -f pyproject.toml
-
-# --- Create non-root user and switch ---
-RUN useradd -m -d /home/sonaruser -s /bin/bash sonaruser && \
-    chown -R sonaruser:sonaruser /opt/sonarqube /opt/sonar-scanner /app
-
-USER sonaruser
