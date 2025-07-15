@@ -12,7 +12,7 @@ from .utils import run_command, detect_project_languages, patch_foundry_config
 import json_repair
 from collections import defaultdict
 from .git_utils import clone_repo
-from .sonarqube_utils import scan_project_with_sonar_scanner
+from .codeql_utils import run_codeql_scanner
 
 logger = logging.getLogger(__name__)
 
@@ -521,9 +521,16 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str,
         results["scan_results"]["secrets"] = scan_secrets_with_gitleaks(scan_path)
         results["scan_results"]["semgrep"] = scan_semgrep(scan_path)
         logger.info("Finish running general security scans (secrets, semgrep)")
-        logger.info("Running Sonar Scanner...")
-        # results["scan_results"]["sonar_scanner"] = scan_project_with_sonar_scanner(scan_path)
-        logger.info("Finish running Sonar Scanner")
+        logger.info("Running CodeQL Analysis...")
+        results["scan_results"]["codeql"] = {}
+        results["scan_results"]["codeql"]["issues"] = 0
+        for language in languages:
+            results["scan_results"]["codeql"][language] = run_codeql_scanner(scan_path, language)
+            # Count the number of Issue: in the response
+            results["scan_results"]["codeql"]["issues"] += results["scan_results"]["codeql"][language].count("Issue:")
+            logger.info(f"CodeQL analysis completed for {language}")
+        logger.info("Finish running CodeQL Analysis")
+        logger.info("CodeQL Analysis completed")
 
         # Calculate summary statistics
         total_issues = 0
@@ -533,8 +540,8 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str,
             total_issues += len(results["scan_results"]["secrets"]["secrets"])
         if "semgrep" in results["scan_results"] and "results" in results["scan_results"]["semgrep"]:
             total_issues += len(results["scan_results"]["semgrep"]["results"])
-        if "sonar_scanner" in results["scan_results"] and "issues" in results["scan_results"]["sonar_scanner"]:
-            total_issues += len(results["scan_results"]["sonar_scanner"]["issues"])
+        if "codeql" in results["scan_results"] and "issues" in results["scan_results"]["codeql"]:
+            total_issues += results["scan_results"]["codeql"]["issues"]
         results["summary"]["total_issues"] = total_issues
 
         # Serialize to JSON and truncate if needed
@@ -635,10 +642,13 @@ def scan_code_quality_security(repo_url: str, subfolder: str = "") -> dict[str, 
         # Multi-language analysis
         results["semgrep"] = scan_semgrep(scan_path)
         logger.info("Semgrep analysis completed")
-        logger.info("Running Sonar Scanner...")
-        # results["sonar_scanner"] = scan_project_with_sonar_scanner(scan_path)
-        logger.info("Finish running Sonar Scanner")
-        logger.info("Sonar Scanner analysis completed")
+        logger.info("Running CodeQL Analysis...")
+        results["codeql"] = {}
+        for language in languages:
+            results["codeql"][language] = run_codeql_scanner(scan_path, language)
+            logger.info(f"CodeQL analysis completed for {language}")
+        logger.info("Finish running CodeQL Analysis")
+        logger.info("CodeQL Analysis completed")
 
         return results
 

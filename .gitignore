@@ -204,3 +204,4 @@ src/tests/
 !config.json
 
 .scannerwork/
+mydb/
