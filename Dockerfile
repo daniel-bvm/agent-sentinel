@@ -16,6 +16,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     procps \
     xz-utils \
+    golang \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Java config ---
@@ -39,6 +41,8 @@ RUN export GITLEAKS_VERSION=$(curl -s "https://api.github.com/repos/gitleaks/git
     rm gitleaks.tar.gz
 
 # --- Install Foundry ---
+# Note: This command runs a script that installs Foundry to /root/.foundry
+# and adds it to the PATH.
 RUN curl -L https://foundry.paradigm.xyz | bash && \
     /root/.foundry/bin/foundryup
 ENV PATH="/root/.foundry/bin:$PATH"
@@ -54,12 +58,13 @@ RUN curl -LO https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-$
     rm sonarqube-${SONAR_VERSION}.zip
 
 # --- Install CodeQL CLI ---
-ENV CODEQL_VERSION="2.15.5"
-RUN curl -L -o codeql.tar.gz https://github.com/github/codeql-cli-binaries/releases/download/v${CODEQL_VERSION}/codeql-linux64.tar.gz && \
-    tar -xzf codeql.tar.gz && \
-    mv codeql /opt/codeql && \
+ENV CODEQL_VERSION="2.22.1"
+RUN curl -L -o codeql.zip https://github.com/github/codeql-cli-binaries/releases/download/v${CODEQL_VERSION}/codeql-linux64.zip && \
+    unzip codeql.zip -d /opt/codeql-temp && \
+    mv /opt/codeql-temp/codeql /opt/codeql && \
     ln -s /opt/codeql/codeql /usr/local/bin/codeql && \
-    rm codeql.tar.gz
+    rm codeql.zip && \
+    rm -r /opt/codeql-temp
 
 WORKDIR /app
 
