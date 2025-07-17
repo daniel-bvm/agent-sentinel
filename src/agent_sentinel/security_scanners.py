@@ -13,6 +13,7 @@ import json_repair
 from collections import defaultdict
 from .git_utils import clone_repo
 from .codeql_utils import run_codeql_scanner
+from .trivy_utils import scan_with_trivy
 
 logger = logging.getLogger(__name__)
 
@@ -532,6 +533,11 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str,
         logger.info("Finish running CodeQL Analysis")
         logger.info("CodeQL Analysis completed")
 
+        logger.info("Running Trivy scan...")
+        trivy_result = scan_with_trivy(scan_path)
+        results["scan_results"]["trivy"] = trivy_result[1]
+        logger.info("Finish running Trivy scan")
+
         # Calculate summary statistics
         total_issues = 0
         if "bandit" in results["scan_results"] and "results" in results["scan_results"]["bandit"]:
@@ -542,6 +548,8 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str,
             total_issues += len(results["scan_results"]["semgrep"]["results"])
         if "codeql" in results["scan_results"] and "issues" in results["scan_results"]["codeql"]:
             total_issues += results["scan_results"]["codeql"]["issues"]
+        if "trivy" in results["scan_results"]:
+            total_issues += trivy_result[0]
         results["summary"]["total_issues"] = total_issues
 
         # Serialize to JSON and truncate if needed
