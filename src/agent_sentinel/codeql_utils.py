@@ -143,7 +143,7 @@ def analyze_codeql_database(
     """Analyze a CodeQL database for a given path with a given language."""
     logger.info(f"Analyzing CodeQL database for {scan_path} with {language}...")
     result_output_path = f"{scan_path}/results-{language}.sarif"
-    command = f"codeql database analyze -q {database_path} codeql/{language}-queries --format=sarifv2.1.0 --output={result_output_path}"
+    command = f"codeql database analyze -q {database_path} codeql/{language}-queries --format=sarifv2.1.0 --output={result_output_path} --ram=2048"
     logger.debug(f"Running command: {command}")
     result = subprocess.run(command, shell=True, cwd=scan_path)
     if result.returncode != 0:
