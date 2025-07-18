@@ -472,7 +472,7 @@ def scan_semgrep(scan_path: str) -> str:
         return {"error": result["stderr"]}
 
 
-def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str, Any]:
+def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str:
     """
     Perform a comprehensive security scan of a GitHub repository.
 
@@ -481,10 +481,8 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str,
         subfolder: Optional path to a specific subfolder within the repository
 
     Returns:
-        A comprehensive security analysis report
+        A formatted string with each issue on one line
     """
-    TOKEN_LIMIT = 40000  # character limit for output
-
     try:
         # Clone the repository
         repo_path = clone_repo(repo_url)
@@ -493,76 +491,107 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str,
         # Detect languages
         languages = detect_project_languages(scan_path)
 
-        # Initialize results
-        results = {
-            "repository": repo_url,
-            "languages_detected": languages,
-            "scan_results": {},
-            "summary": {
-                "total_issues": 0,
-                "critical_issues": 0,
-                "high_issues": 0,
-                "medium_issues": 0,
-                "low_issues": 0
-            }
-        }
+        # Initialize results list to collect all issues
+        all_issues = []
 
-        # Run Python-specific scans
-        if 'python' in languages:
-            logger.info("Running Python dependency scans...")
-            # results["scan_results"]["bandit"] = scan_python_bandit(scan_path)
-            results["scan_results"]["safety"] = scan_dependencies_safety(scan_path)
-        if 'javascript' in languages:
-            results["scan_results"]["npm_audit"] = scan_npm_audit(scan_path)
+        # Run Solidity-specific scans
         if "solidity" in languages:
-            results["scan_results"]["slither"] = scan_solidity_slither(scan_path)
+            logger.info("Running Solidity scans...")
+            slither_result = scan_solidity_slither(scan_path)
+            if "error" not in slither_result:
+                for severity in ["high", "medium", "low"]:
+                    if severity in slither_result and slither_result[severity]:
+                        for contract, vulns in slither_result[severity].items():
+                            for vuln in vulns:
+                                all_issues.append(f"Slither [{severity.upper()}] {contract}: {vuln.get('advisory', 'N/A')}")
+            elif slither_result.get("error"):
+                all_issues.append(f"Slither scan error: {slither_result['error']}")
 
         # Run general security scans
         logger.info("Running general security scans (secrets, semgrep)...")
-        results["scan_results"]["secrets"] = scan_secrets_with_gitleaks(scan_path)
-        results["scan_results"]["semgrep"] = scan_semgrep(scan_path)
+
+        # Secrets scan
+        secrets_result = scan_secrets_with_gitleaks(scan_path)
+        if isinstance(secrets_result, str) and secrets_result.strip():
+            # Parse the string result to extract individual issues
+            lines = secrets_result.strip().split('\n')
+            current_file = ""
+            for line in lines:
+                line = line.strip()
+                if line.startswith("File:"):
+                    current_file = line.replace("File:", "").strip()
+                elif line.startswith("Secret:"):
+                    secret = line.replace("Secret:", "").strip()
+                elif line.startswith("Description:"):
+                    description = line.replace("Description:", "").strip()
+                    all_issues.append(f"Secret in {current_file}: {description} - {secret}")
+
+        # Semgrep scan
+        semgrep_result = scan_semgrep(scan_path)
+        if isinstance(semgrep_result, str) and semgrep_result.strip():
+            # Parse the string result to extract individual issues
+            lines = semgrep_result.strip().split('\n')
+            for line in lines:
+                line = line.strip()
+                if line and not line.startswith('📄') and not line.startswith('🔐') and not line.startswith('•') and not line.startswith('-'):
+                    continue
+                elif line.startswith('📄 File:'):
+                    current_file = line.replace('📄 File:', '').strip()
+                elif line.startswith('🔐 CWE:'):
+                    cwe = line.replace('🔐 CWE:', '').strip()
+                elif 'Line ' in line and ':' in line:
+                    # Extract line info and message
+                    parts = line.split(':', 1)
+                    if len(parts) == 2:
+                        line_info = parts[0].strip().replace('- ', '')
+                        message = parts[1].strip()
+                        all_issues.append(f"Semgrep {current_file} {line_info}: {message} (CWE: {cwe})")
+
         logger.info("Finish running general security scans (secrets, semgrep)")
+
+        # CodeQL Analysis
         logger.info("Running CodeQL Analysis...")
-        results["scan_results"]["codeql"] = {}
-        results["scan_results"]["codeql"]["issues"] = 0
         for language in languages:
-            results["scan_results"]["codeql"][language] = run_codeql_scanner(scan_path, language)
-            # Count the number of Issue: in the response
-            results["scan_results"]["codeql"]["issues"] += results["scan_results"]["codeql"][language].count("Issue:")
+            codeql_result = run_codeql_scanner(scan_path, language)
+            if isinstance(codeql_result, str) and codeql_result.strip():
+                # Parse CodeQL results to extract individual issues
+                lines = codeql_result.strip().split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith("Issue:"):
+                        all_issues.append(f"CodeQL [{language}] {line}")
             logger.info(f"CodeQL analysis completed for {language}")
         logger.info("Finish running CodeQL Analysis")
-        logger.info("CodeQL Analysis completed")
 
+        # Trivy scan
         logger.info("Running Trivy scan...")
         trivy_result = scan_with_trivy(scan_path)
-        results["scan_results"]["trivy"] = trivy_result[1]
+        if len(trivy_result) == 2 and isinstance(trivy_result[1], str):
+            trivy_output = trivy_result[1].strip()
+            if trivy_output:
+                lines = trivy_output.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if line and not line.startswith("Total number of"):
+                        all_issues.append(f"Trivy: {line}")
         logger.info("Finish running Trivy scan")
 
-        # Calculate summary statistics
-        total_issues = 0
-        if "bandit" in results["scan_results"] and "results" in results["scan_results"]["bandit"]:
-            total_issues += len(results["scan_results"]["bandit"]["results"])
-        if "secrets" in results["scan_results"] and "secrets" in results["scan_results"]["secrets"]:
-            total_issues += len(results["scan_results"]["secrets"]["secrets"])
-        if "semgrep" in results["scan_results"] and "results" in results["scan_results"]["semgrep"]:
-            total_issues += len(results["scan_results"]["semgrep"]["results"])
-        if "codeql" in results["scan_results"] and "issues" in results["scan_results"]["codeql"]:
-            total_issues += results["scan_results"]["codeql"]["issues"]
-        if "trivy" in results["scan_results"]:
-            total_issues += trivy_result[0]
-        results["summary"]["total_issues"] = total_issues
+        # Combine all issues into a single string
+        result_string = '\n'.join(all_issues)
 
-        # Serialize to JSON and truncate if needed
-        json_str = json.dumps(results, separators=(",", ":"))
-        if len(json_str) > TOKEN_LIMIT:
-            json_str = json_str[:TOKEN_LIMIT] + "... (truncated)"
-            # Try to parse as much as possible, but it may be invalid JSON, so return a dict with a warning
-            return {"truncated": True, "partial_results": json_str}
-        else:
-            return results
+        # Write results to text file
+        output_file = os.path.join(scan_path, "security_scan_results.txt")
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(result_string)
+
+        logger.info(f"Security scan results written to: {output_file}")
+
+        return result_string
 
     except Exception as e:
-        return {"error": f"Failed to perform security scan: {str(e)}"}
+        error_msg = f"Failed to perform security scan: {str(e)}"
+        logger.error(error_msg)
+        return error_msg
 
 
 def scan_for_secrets(repo_url: str, subfolder: str = "") -> dict[str, Any]:
@@ -675,82 +704,25 @@ def generate_security_report(repo_url: str) -> str:
         A formatted security report with findings and recommendations
     """
     try:
-        # Get comprehensive scan results
+        # Get comprehensive scan results (already formatted as string)
         scan_results = comprehensive_security_scan(repo_url)
 
-        if "error" in scan_results:
-            return f"Error generating report: {scan_results['error']}"
+        # Check if it's an error message
+        if scan_results.startswith("Failed to perform security scan:"):
+            return f"Error generating report: {scan_results}"
 
-        # Generate formatted report
-        report = f"""
-# Security Analysis Report for {repo_url}
+        # Add header and recommendations to the scan results
+        report = f"""# Security Analysis Report
 
-## Summary
-- **Total Issues Found**: {scan_results['summary']['total_issues']}
-- **Languages Detected**: {', '.join(scan_results['languages_detected'])}
+{scan_results}
 
-## Scan Results
-
-### Secret Detection
+## Recommendations
+1. Address all critical and high-severity issues immediately
+2. Implement secret scanning in CI/CD pipeline
+3. Enable dependency vulnerability scanning
+4. Regular security audits and code reviews
+5. Follow security best practices for detected languages
 """
-
-        if "secrets" in scan_results["scan_results"]:
-            secrets = scan_results["scan_results"]["secrets"]
-            if "secrets" in secrets:
-                report += f"- **Secrets Found**: {len(secrets['secrets'])}\n"
-                for secret in secrets["secrets"][:5]:  # Show first 5
-                    report += f"  - {secret.get('DetectorName', 'Unknown')}: {secret.get('Raw', 'N/A')[:50]}...\n"
-            else:
-                report += "- No secrets detected\n"
-
-        report += "\n### Code Quality Issues\n"
-
-        if "bandit" in scan_results["scan_results"]:
-            bandit = scan_results["scan_results"]["bandit"]
-            if "results" in bandit:
-                report += f"- **Bandit Issues**: {len(bandit['results'])}\n"
-                for issue in bandit["results"][:5]:  # Show first 5
-                    report += f"  - {issue.get('issue_severity', 'Unknown')}: {issue.get('issue_text', 'N/A')}\n"
-
-        if "semgrep" in scan_results["scan_results"]:
-            semgrep = scan_results["scan_results"]["semgrep"]
-            if "results" in semgrep:
-                report += f"- **Semgrep Issues**: {len(semgrep['results'])}\n"
-
-        report += "\n### Infrastructure Security\n"
-
-        if "dockerfile" in scan_results["scan_results"]:
-            dockerfile = scan_results["scan_results"]["dockerfile"]
-            if "error" not in dockerfile:
-                report += f"- **Dockerfile Issues**: Found {len(dockerfile)} Dockerfiles\n"
-                for file, issues in dockerfile.items():
-                    if "issues" in issues and issues["issues"]:
-                        report += f"  - {file}: {len(issues['issues'])} issues\n"
-
-        report += "\n## Recommendations\n"
-        report += "1. Address all critical and high-severity issues immediately\n"
-        report += "2. Implement secret scanning in CI/CD pipeline\n"
-        report += "3. Enable dependency vulnerability scanning\n"
-        report += "4. Regular security audits and code reviews\n"
-        report += "5. Follow security best practices for detected languages\n"
-
-        report += "\n### Dependency Vulnerabilities\n"
-        deps = scan_results.get("scan_results", {}).get("dependencies", {})
-        if not deps:
-            report += "- No dependency vulnerability data available\n"
-        else:
-            for lang, details in deps.items():
-                report += f"- **{lang.title()}**:\n"
-                vulns = details.get("vulnerabilities", [])
-                if vulns:
-                    for vuln in vulns[:5]:  # Show first 5 only
-                        report += f"  - {vuln['dependency'] or vuln.get('package')}: {vuln['title']} ({vuln.get('cve_id')}) - Severity: {vuln.get('severity', 'N/A')}\n"
-                    if len(vulns) > 5:
-                        report += f"  - ... and {len(vulns) - 5} more\n"
-                elif "error" in details:
-                    report += f"  - Error: {details['error']}\n"
-                else:
-                    report += "  - No known vulnerabilities found\n"
 
         return report
 

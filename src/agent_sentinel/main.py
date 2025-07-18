@@ -91,7 +91,7 @@ def provide_guide_for_github_access_token() -> str:
 
 
 @mcp.tool()
-def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str, Any]:
+def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str:
     """
     Perform a comprehensive security scan of a GitHub repository.
 
@@ -100,7 +100,7 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> dict[str,
         subfolder: Optional path to a specific subfolder within the repository
 
     Returns:
-        A comprehensive security analysis report
+        A formatted string with each issue on one line
     """
     return security_scanners.comprehensive_security_scan(repo_url, subfolder)
 
