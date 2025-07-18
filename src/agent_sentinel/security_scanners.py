@@ -6,6 +6,7 @@ import os
 import json
 import logging
 import re
+import asyncio
 
 from typing import Any
 from .utils import run_command, detect_project_languages, patch_foundry_config
@@ -14,6 +15,7 @@ from collections import defaultdict
 from .git_utils import clone_repo
 from .codeql_utils import run_codeql_scanner
 from .trivy_utils import scan_with_trivy
+from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -472,7 +474,47 @@ def scan_semgrep(scan_path: str) -> str:
         return {"error": result["stderr"]}
 
 
-def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str:
+async def summarize_with_llm(content: str) -> str:
+    """
+    Summarize content using LLM.
+
+    Args:
+        content: The content to summarize
+
+    Returns:
+        Summarized content
+    """
+    try:
+        client = AsyncOpenAI(
+            base_url=os.getenv("LLM_BASE_URL"),
+            api_key=os.getenv("LLM_API_KEY")
+        )
+
+        response = await client.chat.completions.create(
+            model=os.getenv("LLM_MODEL_ID", "gpt-3.5-turbo"),
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a security analyst. Summarize the security scan results, keeping the most critical findings and their details. Maintain the format but consolidate similar issues."
+                },
+                {
+                    "role": "user",
+                    "content": f"Summarize these security scan results:\n\n{content}"
+                }
+            ],
+            max_tokens=2000,
+            temperature=0.1
+        )
+        # Remove the section between <think> and </think>
+        content = re.sub(r'<think>.*?</think>', '', response.choices[0].message.content, flags=re.DOTALL)
+        return content
+
+    except Exception as e:
+        logger.error(f"Failed to summarize with LLM: {str(e)}")
+        return content  # Return original content if summarization fails
+
+
+async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str:
     """
     Perform a comprehensive security scan of a GitHub repository.
 
@@ -578,6 +620,28 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str:
 
         # Combine all issues into a single string
         result_string = '\n'.join(all_issues)
+
+        # Check if result is too long and needs summarization
+        while len(result_string) > 40000:
+            logger.info(f"Result string length ({len(result_string)}) exceeds 40000, summarizing with LLM...")
+
+            # Split into chunks of 100 lines
+            lines = result_string.split('\n')
+            chunks = []
+            for i in range(0, len(lines), 100):
+                chunk = '\n'.join(lines[i:i+100])
+                chunks.append(chunk)
+
+            # Summarize each chunk
+            summarized_chunks = []
+            for i, chunk in enumerate(chunks):
+                logger.info(f"Summarizing chunk {i+1}/{len(chunks)}...")
+                summarized = await summarize_with_llm(chunk)
+                summarized_chunks.append(summarized)
+
+            # Combine summarized chunks
+            result_string = '\n\n--- CHUNK SUMMARY ---\n\n'.join(summarized_chunks)
+            logger.info(f"Summarization complete. New length: {len(result_string)}")
 
         # Write results to text file
         output_file = os.path.join(scan_path, "security_scan_results.txt")
@@ -693,7 +757,7 @@ def scan_code_quality_security(repo_url: str, subfolder: str = "") -> dict[str, 
         return {"error": f"Failed to perform code analysis: {str(e)}"}
 
 
-def generate_security_report(repo_url: str) -> str:
+async def generate_security_report(repo_url: str) -> str:
     """
     Generate a comprehensive security report for a GitHub repository.
 
@@ -705,7 +769,7 @@ def generate_security_report(repo_url: str) -> str:
     """
     try:
         # Get comprehensive scan results (already formatted as string)
-        scan_results = comprehensive_security_scan(repo_url)
+        scan_results = await comprehensive_security_scan(repo_url)
 
         # Check if it's an error message
         if scan_results.startswith("Failed to perform security scan:"):

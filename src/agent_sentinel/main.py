@@ -91,7 +91,7 @@ def provide_guide_for_github_access_token() -> str:
 
 
 @mcp.tool()
-def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str:
+async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str:
     """
     Perform a comprehensive security scan of a GitHub repository.
 
@@ -102,7 +102,7 @@ def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str:
     Returns:
         A formatted string with each issue on one line
     """
-    return security_scanners.comprehensive_security_scan(repo_url, subfolder)
+    return await security_scanners.comprehensive_security_scan(repo_url, subfolder)
 
 
 @mcp.tool()
@@ -151,7 +151,7 @@ def scan_code_quality_security(repo_url: str, subfolder: str = "") -> dict[str, 
 
 
 @mcp.tool()
-def generate_security_report(repo_url: str) -> str:
+async def generate_security_report(repo_url: str) -> str:
     """
     Generate a comprehensive security report for a GitHub repository.
 
@@ -161,4 +161,4 @@ def generate_security_report(repo_url: str) -> str:
     Returns:
         A formatted security report with findings and recommendations
     """
-    return security_scanners.generate_security_report(repo_url)
+    return await security_scanners.generate_security_report(repo_url)
