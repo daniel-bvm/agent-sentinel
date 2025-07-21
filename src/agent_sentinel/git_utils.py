@@ -5,7 +5,6 @@ import tempfile
 import shutil
 import hashlib
 import git
-from .github_utils import get_github_headers
 
 PER_PAGE = 100
 

@@ -1,4 +1,4 @@
-FROM nikolasigmoid/py-mcp-proxy:latest
+FROM python:3.12-slim
 
 # --- Install dependencies ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -57,11 +57,15 @@ RUN wget https://github.com/aquasecurity/trivy/releases/download/v0.20.2/trivy_0
     dpkg -i trivy_0.20.2_Linux-64bit.deb && \
     rm trivy_0.20.2_Linux-64bit.deb
 
-WORKDIR /app
+WORKDIR /workspace
 
 COPY pyproject.toml pyproject.toml
 COPY src src
+RUN pip install . && rm -f pyproject.toml
+
 COPY config.json config.json
 COPY system_prompt.txt system_prompt.txt
+COPY server.py server.py
+COPY app app
 
-RUN pip install . && rm -f pyproject.toml
+CMD ["python", "server.py"]

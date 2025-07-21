@@ -724,35 +724,35 @@ async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> lis
                         ))
         logger.info("Finish running Trivy scan")
 
-        # Check if result is too long and needs summarization
-        result_string = '\n'.join(str(report) for report in all_reports)
+        # # Check if result is too long and needs summarization
+        # result_string = '\n'.join(str(report) for report in all_reports)
 
-        while len(result_string) > 40000:
-            logger.info(f"Result string length ({len(result_string)}) exceeds 40000, summarizing with LLM...")
+        # while len(result_string) > 40000:
+        #     logger.info(f"Result string length ({len(result_string)}) exceeds 40000, summarizing with LLM...")
 
-            # Split reports into chunks of 100
-            chunks = []
-            for i in range(0, len(all_reports), 100):
-                chunk_reports = all_reports[i:i+100]
-                chunk_string = '\n'.join(str(report) for report in chunk_reports)
-                chunks.append(chunk_string)
+        #     # Split reports into chunks of 100
+        #     chunks = []
+        #     for i in range(0, len(all_reports), 100):
+        #         chunk_reports = all_reports[i:i+100]
+        #         chunk_string = '\n'.join(str(report) for report in chunk_reports)
+        #         chunks.append(chunk_string)
 
-            # Summarize each chunk
-            summarized_chunks = []
-            for i, chunk in enumerate(chunks):
-                logger.info(f"Summarizing chunk {i+1}/{len(chunks)}...")
-                summarized = await summarize_with_llm(chunk)
-                summarized_chunks.append(summarized)
+        #     # Summarize each chunk
+        #     summarized_chunks = []
+        #     for i, chunk in enumerate(chunks):
+        #         logger.info(f"Summarizing chunk {i+1}/{len(chunks)}...")
+        #         summarized = await summarize_with_llm(chunk)
+        #         summarized_chunks.append(summarized)
 
-            # Parse summarized chunks back into Report objects
-            all_reports = []
-            for summarized_chunk in summarized_chunks:
-                chunk_reports = _parse_scan_results_to_reports(summarized_chunk)
-                all_reports.extend(chunk_reports)
+        #     # Parse summarized chunks back into Report objects
+        #     all_reports = []
+        #     for summarized_chunk in summarized_chunks:
+        #         chunk_reports = _parse_scan_results_to_reports(summarized_chunk)
+        #         all_reports.extend(chunk_reports)
 
-            # Recalculate string length for next iteration
-            result_string = '\n'.join(str(report) for report in all_reports)
-            logger.info(f"Summarization complete. New length: {len(result_string)}")
+        #     # Recalculate string length for next iteration
+        #     result_string = '\n'.join(str(report) for report in all_reports)
+        #     logger.info(f"Summarization complete. New length: {len(result_string)}")
 
         logger.info(f"Security scan completed with {len(all_reports)} findings")
         return all_reports

@@ -16,6 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("Sentinel - Security Analysis Agent", dependencies=["gitpython"])
+audit_mcp = FastMCP("Sentinel - Audit Agent", dependencies=["gitpython"]) 
 
 load_dotenv()
 
@@ -90,7 +91,7 @@ def provide_guide_for_github_access_token() -> str:
     return github_utils.provide_guide_for_github_access_token()
 
 
-@mcp.tool()
+@audit_mcp.tool()
 async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str:
     """
     Perform a comprehensive security scan of a GitHub repository.
@@ -105,7 +106,7 @@ async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str
     return await security_scanners.comprehensive_security_scan(repo_url, subfolder)
 
 
-@mcp.tool()
+@audit_mcp.tool()
 def scan_for_secrets(repo_url: str, subfolder: str = "") -> dict[str, Any]:
     """
     Scan a GitHub repository for exposed secrets and sensitive information.
@@ -120,7 +121,7 @@ def scan_for_secrets(repo_url: str, subfolder: str = "") -> dict[str, Any]:
     return security_scanners.scan_for_secrets(repo_url, subfolder)
 
 
-@mcp.tool()
+@audit_mcp.tool()
 def scan_dependencies_vulnerabilities(repo_url: str, subfolder: str = "") -> dict[str, Any]:
     """
     Scan a GitHub repository for vulnerable dependencies.
@@ -135,7 +136,7 @@ def scan_dependencies_vulnerabilities(repo_url: str, subfolder: str = "") -> dic
     return security_scanners.scan_dependencies_vulnerabilities(repo_url, subfolder)
 
 
-@mcp.tool()
+@audit_mcp.tool()
 def scan_code_quality_security(repo_url: str, subfolder: str = "") -> dict[str, Any]:
     """
     Perform static code analysis for security issues and code quality.
@@ -150,7 +151,7 @@ def scan_code_quality_security(repo_url: str, subfolder: str = "") -> dict[str, 
     return security_scanners.scan_code_quality_security(repo_url, subfolder)
 
 
-@mcp.tool()
+@audit_mcp.tool()
 async def generate_security_report(repo_url: str) -> str:
     """
     Generate a comprehensive security report for a GitHub repository.
