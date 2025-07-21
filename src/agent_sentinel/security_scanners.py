@@ -20,6 +20,68 @@ from openai import AsyncOpenAI
 logger = logging.getLogger(__name__)
 
 
+class Report:
+    """
+    Represents a security finding from various security scanning tools.
+    """
+
+    def __init__(
+        self,
+        tool: str,
+        severity: str,
+        description: str,
+        file_path: str | None = None,
+        line_number: str | None = None,
+        additional_info: dict[str, Any] | None = None
+    ):
+        """
+        Initialize a security report.
+
+        Args:
+            tool: The security tool that found the issue (e.g., 'Slither', 'Semgrep', 'CodeQL')
+            severity: The severity level (e.g., 'HIGH', 'MEDIUM', 'LOW', 'CRITICAL')
+            description: Description of the security issue
+            file_path: Optional path to the file where the issue was found
+            line_number: Optional line number(s) where the issue was found
+            additional_info: Optional dictionary containing additional metadata
+        """
+        self.tool = tool
+        self.severity = severity.upper() if severity else "UNKNOWN"
+        self.description = description
+        self.file_path = file_path
+        self.line_number = line_number
+        self.additional_info = additional_info or {}
+
+    def __str__(self) -> str:
+        """String representation of the report."""
+        parts = [f"{self.tool} [{self.severity}]"]
+
+        if self.file_path:
+            parts.append(f"in {self.file_path}")
+
+        if self.line_number:
+            parts.append(f"line {self.line_number}")
+
+        parts.append(f": {self.description}")
+
+        return " ".join(parts)
+
+    def __repr__(self) -> str:
+        """Detailed representation of the report."""
+        return f"Report(tool='{self.tool}', severity='{self.severity}', description='{self.description}', file_path='{self.file_path}', line_number='{self.line_number}')"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert the report to a dictionary."""
+        return {
+            "tool": self.tool,
+            "severity": self.severity,
+            "description": self.description,
+            "file_path": self.file_path,
+            "line_number": self.line_number,
+            "additional_info": self.additional_info
+        }
+
+
 def clean_file_path(file_path: str, repo_path: str) -> str:
     """
     Clean file path by removing the base repository path pattern.
@@ -514,7 +576,7 @@ async def summarize_with_llm(content: str) -> str:
         return content  # Return original content if summarization fails
 
 
-async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str:
+async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> list[Report]:
     """
     Perform a comprehensive security scan of a GitHub repository.
 
@@ -523,7 +585,7 @@ async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str
         subfolder: Optional path to a specific subfolder within the repository
 
     Returns:
-        A formatted string with each issue on one line
+        A list of Report objects containing security findings
     """
     try:
         # Clone the repository
@@ -534,7 +596,7 @@ async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str
         languages = detect_project_languages(scan_path)
 
         # Initialize results list to collect all issues
-        all_issues = []
+        all_reports = []
 
         # Run Solidity-specific scans
         if "solidity" in languages:
@@ -545,9 +607,19 @@ async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str
                     if severity in slither_result and slither_result[severity]:
                         for contract, vulns in slither_result[severity].items():
                             for vuln in vulns:
-                                all_issues.append(f"Slither [{severity.upper()}] {contract}: {vuln.get('advisory', 'N/A')}")
+                                all_reports.append(Report(
+                                    tool="Slither",
+                                    severity=severity.upper(),
+                                    description=vuln.get('advisory', 'N/A'),
+                                    additional_info={"contract": contract}
+                                ))
             elif slither_result.get("error"):
-                all_issues.append(f"Slither scan error: {slither_result['error']}")
+                all_reports.append(Report(
+                    tool="Slither",
+                    severity="ERROR",
+                    description=f"Slither scan error: {slither_result['error']}",
+                    additional_info={"error_type": "scan_failure"}
+                ))
 
         # Run general security scans
         logger.info("Running general security scans (secrets, semgrep)...")
@@ -558,6 +630,7 @@ async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str
             # Parse the string result to extract individual issues
             lines = secrets_result.strip().split('\n')
             current_file = ""
+            secret = ""
             for line in lines:
                 line = line.strip()
                 if line.startswith("File:"):
@@ -566,13 +639,21 @@ async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str
                     secret = line.replace("Secret:", "").strip()
                 elif line.startswith("Description:"):
                     description = line.replace("Description:", "").strip()
-                    all_issues.append(f"Secret in {current_file}: {description} - {secret}")
+                    all_reports.append(Report(
+                        tool="Secret Scanner",
+                        severity="HIGH",
+                        description=description,
+                        file_path=current_file,
+                        additional_info={"secret_type": secret}
+                    ))
 
         # Semgrep scan
         semgrep_result = scan_semgrep(scan_path)
         if isinstance(semgrep_result, str) and semgrep_result.strip():
             # Parse the string result to extract individual issues
             lines = semgrep_result.strip().split('\n')
+            current_file = ""
+            cwe = ""
             for line in lines:
                 line = line.strip()
                 if line and not line.startswith('📄') and not line.startswith('🔐') and not line.startswith('•') and not line.startswith('-'):
@@ -587,7 +668,14 @@ async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str
                     if len(parts) == 2:
                         line_info = parts[0].strip().replace('- ', '')
                         message = parts[1].strip()
-                        all_issues.append(f"Semgrep {current_file} {line_info}: {message} (CWE: {cwe})")
+                        all_reports.append(Report(
+                            tool="Semgrep",
+                            severity="MEDIUM",
+                            description=message,
+                            file_path=current_file,
+                            line_number=line_info.replace('Line ', ''),
+                            additional_info={"cwe": cwe}
+                        ))
 
         logger.info("Finish running general security scans (secrets, semgrep)")
 
@@ -601,7 +689,12 @@ async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str
                 for line in lines:
                     line = line.strip()
                     if line.startswith("Issue:"):
-                        all_issues.append(f"CodeQL [{language}] {line}")
+                        all_reports.append(Report(
+                            tool="CodeQL",
+                            severity="MEDIUM",
+                            description=line.replace("Issue:", "").strip(),
+                            additional_info={"language": language}
+                        ))
             logger.info(f"CodeQL analysis completed for {language}")
         logger.info("Finish running CodeQL Analysis")
 
@@ -615,47 +708,25 @@ async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str
                 for line in lines:
                     line = line.strip()
                     if line and not line.startswith("Total number of"):
-                        all_issues.append(f"Trivy: {line}")
+                        all_reports.append(Report(
+                            tool="Trivy",
+                            severity="MEDIUM",
+                            description=line
+                        ))
         logger.info("Finish running Trivy scan")
 
-        # Combine all issues into a single string
-        result_string = '\n'.join(all_issues)
-
-        # Check if result is too long and needs summarization
-        while len(result_string) > 40000:
-            logger.info(f"Result string length ({len(result_string)}) exceeds 40000, summarizing with LLM...")
-
-            # Split into chunks of 100 lines
-            lines = result_string.split('\n')
-            chunks = []
-            for i in range(0, len(lines), 100):
-                chunk = '\n'.join(lines[i:i+100])
-                chunks.append(chunk)
-
-            # Summarize each chunk
-            summarized_chunks = []
-            for i, chunk in enumerate(chunks):
-                logger.info(f"Summarizing chunk {i+1}/{len(chunks)}...")
-                summarized = await summarize_with_llm(chunk)
-                summarized_chunks.append(summarized)
-
-            # Combine summarized chunks
-            result_string = '\n\n--- CHUNK SUMMARY ---\n\n'.join(summarized_chunks)
-            logger.info(f"Summarization complete. New length: {len(result_string)}")
-
-        # Write results to text file
-        output_file = os.path.join(scan_path, "security_scan_results.txt")
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(result_string)
-
-        logger.info(f"Security scan results written to: {output_file}")
-
-        return result_string
+        logger.info(f"Security scan completed with {len(all_reports)} findings")
+        return all_reports
 
     except Exception as e:
         error_msg = f"Failed to perform security scan: {str(e)}"
         logger.error(error_msg)
-        return error_msg
+        return [Report(
+            tool="System",
+            severity="ERROR",
+            description=error_msg,
+            additional_info={"error_type": "scan_failure"}
+        )]
 
 
 def scan_for_secrets(repo_url: str, subfolder: str = "") -> dict[str, Any]:
@@ -768,17 +839,22 @@ async def generate_security_report(repo_url: str) -> str:
         A formatted security report with findings and recommendations
     """
     try:
-        # Get comprehensive scan results (already formatted as string)
+        # Get comprehensive scan results (list of Report objects)
         scan_results = await comprehensive_security_scan(repo_url)
 
-        # Check if it's an error message
-        if scan_results.startswith("Failed to perform security scan:"):
-            return f"Error generating report: {scan_results}"
+        # Check if we have error reports
+        if len(scan_results) == 1 and scan_results[0].tool == "System" and scan_results[0].severity == "ERROR":
+            return f"Error generating report: {scan_results[0].description}"
+
+        # Convert reports to formatted string
+        findings_text = ""
+        for report in scan_results:
+            findings_text += f"{report}\n"
 
         # Add header and recommendations to the scan results
         report = f"""# Security Analysis Report
 
-{scan_results}
+{findings_text}
 
 ## Recommendations
 1. Address all critical and high-severity issues immediately
