@@ -107,8 +107,8 @@ async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str
     return await security_scanners.comprehensive_security_scan(repo_url, subfolder)
 
 
-@mcp.tool()
-def scan_for_secrets(repo_url: str, subfolder: str = "") -> list[Report]:
+@audit_mcp.tool()
+async def scan_for_secrets(repo_url: str, subfolder: str = "") -> list[Report]:
     """
     Scan a GitHub repository for exposed secrets and sensitive information.
 
@@ -119,11 +119,11 @@ def scan_for_secrets(repo_url: str, subfolder: str = "") -> list[Report]:
     Returns:
         A list of Report objects containing secret findings
     """
-    return security_scanners.scan_for_secrets(repo_url, subfolder)
+    return await security_scanners.scan_for_secrets(repo_url, subfolder)
 
 
-@mcp.tool()
-def scan_dependencies_vulnerabilities(repo_url: str, subfolder: str = "") -> list[Report]:
+@audit_mcp.tool()
+async def scan_dependencies_vulnerabilities(repo_url: str, subfolder: str = "") -> list[Report]:
     """
     Scan a GitHub repository for vulnerable dependencies.
 
@@ -134,11 +134,11 @@ def scan_dependencies_vulnerabilities(repo_url: str, subfolder: str = "") -> lis
     Returns:
         A list of Report objects containing dependency vulnerability findings
     """
-    return security_scanners.scan_dependencies_vulnerabilities(repo_url, subfolder)
+    return await security_scanners.scan_dependencies_vulnerabilities(repo_url, subfolder)
 
 
-@mcp.tool()
-def scan_code_quality_security(repo_url: str, subfolder: str = "") -> list[Report]:
+@audit_mcp.tool()
+async def scan_code_quality_security(repo_url: str, subfolder: str = "") -> list[Report]:
     """
     Perform static code analysis for security issues and code quality.
 
@@ -149,18 +149,4 @@ def scan_code_quality_security(repo_url: str, subfolder: str = "") -> list[Repor
     Returns:
         A list of Report objects containing code quality and security findings
     """
-    return security_scanners.scan_code_quality_security(repo_url, subfolder)
-
-
-@audit_mcp.tool()
-async def generate_security_report(repo_url: str) -> str:
-    """
-    Generate a comprehensive security report for a GitHub repository.
-
-    Args:
-        repo_url: The URL of the Git repository to analyze
-
-    Returns:
-        A formatted security report with findings and recommendations
-    """
-    return await security_scanners.generate_security_report(repo_url)
+    return await security_scanners.scan_code_quality_security(repo_url, subfolder)

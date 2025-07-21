@@ -4,9 +4,24 @@ import os
 import subprocess
 import logging
 import tomlkit
-from typing import Any
+from typing import Any, Callable
+import asyncio
+from functools import partial
+from typing import Any, Callable, Generator, AsyncGenerator
+from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
+
+def sync2async(sync_func: Callable):
+    async def async_func(*args, **kwargs):
+        res = run_in_threadpool(partial(sync_func, *args, **kwargs))
+
+        if isinstance(res, (Generator, AsyncGenerator)):
+            return res
+
+        return await res
+
+    return async_func if not asyncio.iscoroutinefunction(sync_func) else sync_func
 
 
 def run_command(cmd: list[str], cwd: str = None) -> dict[str, Any]:

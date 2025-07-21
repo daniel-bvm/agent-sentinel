@@ -8,14 +8,13 @@ import logging
 import re
 import asyncio
 
-from typing import Any
-from .utils import run_command, detect_project_languages, patch_foundry_config
+from typing import Any, AsyncGenerator
+from .utils import run_command, detect_project_languages, patch_foundry_config, sync2async
 import json_repair
 from collections import defaultdict
 from .git_utils import clone_repo
 from .codeql_utils import run_codeql_scanner
 from .trivy_utils import scan_with_trivy
-from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +31,8 @@ class Report:
         description: str,
         file_path: str | None = None,
         line_number: str | None = None,
-        additional_info: dict[str, Any] | None = None
+        language: str = "code",
+        cwe: str = "n/a"
     ):
         """
         Initialize a security report.
@@ -43,14 +43,16 @@ class Report:
             description: Description of the security issue
             file_path: Optional path to the file where the issue was found
             line_number: Optional line number(s) where the issue was found
-            additional_info: Optional dictionary containing additional metadata
+            language: Programming language (default: "code")
+            cwe: Common Weakness Enumeration identifier (default: "n/a")
         """
         self.tool = tool
         self.severity = severity.upper() if severity else "UNKNOWN"
         self.description = description
         self.file_path = file_path
         self.line_number = line_number
-        self.additional_info = additional_info or {}
+        self.language = language
+        self.cwe = cwe
 
     def __str__(self) -> str:
         """String representation of the report."""
@@ -68,7 +70,7 @@ class Report:
 
     def __repr__(self) -> str:
         """Detailed representation of the report."""
-        return f"Report(tool='{self.tool}', severity='{self.severity}', description='{self.description}', file_path='{self.file_path}', line_number='{self.line_number}')"
+        return f"Report(tool='{self.tool}', severity='{self.severity}', description='{self.description}', file_path='{self.file_path}', line_number='{self.line_number}', language='{self.language}', cwe='{self.cwe}')"
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the report to a dictionary."""
@@ -78,8 +80,48 @@ class Report:
             "description": self.description,
             "file_path": self.file_path,
             "line_number": self.line_number,
-            "additional_info": self.additional_info
+            "language": self.language,
+            "cwe": self.cwe
         }
+
+
+class ErrorReport(Report):
+    """
+    Represents an error that occurred during security scanning.
+    """
+
+    def __init__(
+        self,
+        tool: str,
+        reason: str
+    ):
+        """
+        Initialize an error report.
+
+        Args:
+            tool: The security tool that encountered the error
+            reason: Specific reason for the error
+        """
+        super().__init__(
+            tool=tool,
+            severity="ERROR",
+            description=f"{tool} error: {reason}",
+            file_path=None,
+            line_number=None,
+            language="code",
+            cwe="n/a"
+        )
+        self.reason = reason
+
+    def __repr__(self) -> str:
+        """Detailed representation of the error report."""
+        return f"ErrorReport(tool='{self.tool}', severity='{self.severity}', description='{self.description}', reason='{self.reason}', file_path='{self.file_path}', line_number='{self.line_number}', language='{self.language}', cwe='{self.cwe}')"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert the error report to a dictionary."""
+        result = super().to_dict()
+        result["reason"] = self.reason
+        return result
 
 
 def clean_file_path(file_path: str, repo_path: str) -> str:
@@ -535,55 +577,71 @@ def scan_semgrep(scan_path: str) -> str:
     else:
         return {"error": result["stderr"]}
 
-
-async def summarize_with_llm(content: str) -> str:
-    """
-    Summarize content using LLM.
-
-    Args:
-        content: The content to summarize
-
-    Returns:
-        Summarized content
-    """
+async def a_stupid_wrapper(identity: str, awaitable_task: asyncio.Awaitable) -> tuple[str, Any | Exception]:
     try:
-        client = AsyncOpenAI(
-            base_url=os.getenv("LLM_BASE_URL"),
-            api_key=os.getenv("LLM_API_KEY")
-        )
-
-        response = await client.chat.completions.create(
-            model=os.getenv("LLM_MODEL_ID", "gpt-3.5-turbo"),
-            messages=[
-                {
-                    "role": "system",
-                    "content": """You are a security analyst. Summarize the security scan results, keeping the most critical findings and their details.
-
-IMPORTANT: You must maintain the exact format for each line:
-- For Slither: "Slither [SEVERITY] ContractName: Description"
-- For Secret Scanner: "Secret Scanner [HIGH] in filepath: Description"
-- For Semgrep: "Semgrep [MEDIUM] in filepath line X: Description (CWE: Y)"
-- For CodeQL: "CodeQL [MEDIUM]: Description"
-- For Trivy: "Trivy [MEDIUM]: Description"
-
-Group similar issues and keep only the most critical ones. Do not change the line format structure."""
-                },
-                {
-                    "role": "user",
-                    "content": f"Summarize these security scan results:\n\n{content}"
-                }
-            ],
-            max_tokens=2000,
-            temperature=0.1
-        )
-        # Remove the section between <think> and </think>
-        result = re.sub(r'<think>.*?</think>', '', response.choices[0].message.content, flags=re.DOTALL)
-        return result
-
+        result = await awaitable_task
+        return identity, result
     except Exception as e:
-        logger.error(f"Failed to summarize with LLM: {str(e)}")
-        return content  # Return original content if summarization fails
+        return identity, e
+    
+def _parse_slither_result(slither_result: dict[str, Any]) -> list[Report]:
+    all_reports = []
+    
+    if "error" not in slither_result:
+        for severity in ["high", "medium", "low"]:
+            if severity in slither_result and slither_result[severity]:
+                for contract, vulns in slither_result[severity].items():
+                    for vuln in vulns:
+                        all_reports.append(Report(
+                            tool="Slither",
+                            severity=severity.upper(),
+                            description=f"Contract {contract}: {vuln.get('advisory', 'N/A')}",
+                            language="solidity"
+                        ))
+    elif slither_result.get("error"):
+        all_reports.append(ErrorReport(
+            tool="Slither",
+            reason="scan_failure"
+        ))
+    
+    return all_reports
 
+def _parse_codeql_result(codeql_result: str, language: str) -> list[Report]:
+    all_reports = []
+
+    if isinstance(codeql_result, str) and codeql_result.strip():
+        # Parse CodeQL results to extract individual issues
+        lines = codeql_result.strip().split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.startswith("Issue:"):
+                all_reports.append(Report(
+                    tool="CodeQL",
+                    severity="MEDIUM",
+                    description=line.replace("Issue:", "").strip(),
+                    language=language
+                ))
+                
+    return all_reports
+
+def _convert_dependency_results_to_reports(trivy_result: tuple[str, Any]) -> list[Report]:
+    all_reports = []
+    
+    if len(trivy_result) == 2 and isinstance(trivy_result[1], str):
+        trivy_output = trivy_result[1].strip()
+
+        if trivy_output:
+            lines = trivy_output.split('\n')
+            for line in lines:
+                line = line.strip()
+                if line and not line.startswith("Total number of"):
+                    all_reports.append(Report(
+                        tool="Trivy",
+                        severity="MEDIUM",
+                        description=line
+                    ))
+
+    return all_reports
 
 async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> list[Report]:
     """
@@ -596,131 +654,51 @@ async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> lis
     Returns:
         A list of Report objects containing security findings
     """
-    try:
-        # Clone the repository
-        repo_path = clone_repo(repo_url)
-        scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
+    # Clone the repository
+    repo_path = await sync2async(clone_repo)(repo_url)
+    scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
 
-        # Detect languages
-        languages = detect_project_languages(scan_path)
+    # Detect languages
+    languages = await sync2async(detect_project_languages)(scan_path)
 
-        # Initialize results list to collect all issues
-        all_reports = []
+    # Initialize results list to collect all issues
+    all_reports = []
 
-        # Run Solidity-specific scans
-        if "solidity" in languages:
-            logger.info("Running Solidity scans...")
-            slither_result = scan_solidity_slither(scan_path)
-            if "error" not in slither_result:
-                for severity in ["high", "medium", "low"]:
-                    if severity in slither_result and slither_result[severity]:
-                        for contract, vulns in slither_result[severity].items():
-                            for vuln in vulns:
-                                all_reports.append(Report(
-                                    tool="Slither",
-                                    severity=severity.upper(),
-                                    description=vuln.get('advisory', 'N/A'),
-                                    additional_info={"contract": contract}
-                                ))
-            elif slither_result.get("error"):
-                all_reports.append(Report(
-                    tool="Slither",
-                    severity="ERROR",
-                    description=f"Slither scan error: {slither_result['error']}",
-                    additional_info={"error_type": "scan_failure"}
-                ))
+    # Run Solidity-specific scans
+    if "solidity" in languages:
+        logger.info("Running Solidity scans...")
+        slither_result = await sync2async(scan_solidity_slither)(scan_path)
+        all_reports.extend(_parse_slither_result(slither_result))
 
-        # Run general security scans
-        logger.info("Running general security scans (secrets, semgrep)...")
+    # Run general security scans
+    logger.info("Running general security scans (secrets, semgrep)...")
 
-        # Secrets scan
-        secrets_result = scan_secrets_with_gitleaks(scan_path)
-        all_reports.extend(_convert_secrets_to_reports(secrets_result))
+    # Secrets scan
+    secrets_result = await sync2async(scan_secrets_with_gitleaks)(scan_path)
+    all_reports.extend(_convert_secrets_to_reports(secrets_result))
 
-        # Semgrep scan
-        semgrep_result = scan_semgrep(scan_path)
-        all_reports.extend(_parse_scan_results_to_reports(semgrep_result))
+    # Semgrep scan
+    semgrep_result = await sync2async(scan_semgrep)(scan_path)
+    all_reports.extend(_parse_scan_results_to_reports(semgrep_result))
 
-        logger.info("Finish running general security scans (secrets, semgrep)")
+    logger.info("Finish running general security scans (secrets, semgrep)")
 
-        # CodeQL Analysis
-        logger.info("Running CodeQL Analysis...")
-        for language in languages:
-            codeql_result = run_codeql_scanner(scan_path, language)
-            if isinstance(codeql_result, str) and codeql_result.strip():
-                # Parse CodeQL results to extract individual issues
-                lines = codeql_result.strip().split('\n')
-                for line in lines:
-                    line = line.strip()
-                    if line.startswith("Issue:"):
-                        all_reports.append(Report(
-                            tool="CodeQL",
-                            severity="MEDIUM",
-                            description=line.replace("Issue:", "").strip(),
-                            additional_info={"language": language}
-                        ))
-            logger.info(f"CodeQL analysis completed for {language}")
-        logger.info("Finish running CodeQL Analysis")
+    # CodeQL Analysis
+    logger.info("Running CodeQL Analysis...")
+    for language in languages:
+        codeql_result = await sync2async(run_codeql_scanner)(scan_path, language)
+        logger.info(f"CodeQL analysis completed for {language}")
+        all_reports.extend(_parse_codeql_result(codeql_result, language))
 
-        # Trivy scan
-        logger.info("Running Trivy scan...")
-        trivy_result = scan_with_trivy(scan_path)
-        if len(trivy_result) == 2 and isinstance(trivy_result[1], str):
-            trivy_output = trivy_result[1].strip()
-            if trivy_output:
-                lines = trivy_output.split('\n')
-                for line in lines:
-                    line = line.strip()
-                    if line and not line.startswith("Total number of"):
-                        all_reports.append(Report(
-                            tool="Trivy",
-                            severity="MEDIUM",
-                            description=line
-                        ))
-        logger.info("Finish running Trivy scan")
+    logger.info("Finish running CodeQL Analysis")
 
-        # # Check if result is too long and needs summarization
-        # result_string = '\n'.join(str(report) for report in all_reports)
+    # Trivy scan
+    logger.info("Running Trivy scan...")
+    trivy_result = await sync2async(scan_with_trivy)(scan_path)
+    all_reports.extend(_convert_dependency_results_to_reports(trivy_result))
 
-        # while len(result_string) > 40000:
-        #     logger.info(f"Result string length ({len(result_string)}) exceeds 40000, summarizing with LLM...")
-
-        #     # Split reports into chunks of 100
-        #     chunks = []
-        #     for i in range(0, len(all_reports), 100):
-        #         chunk_reports = all_reports[i:i+100]
-        #         chunk_string = '\n'.join(str(report) for report in chunk_reports)
-        #         chunks.append(chunk_string)
-
-        #     # Summarize each chunk
-        #     summarized_chunks = []
-        #     for i, chunk in enumerate(chunks):
-        #         logger.info(f"Summarizing chunk {i+1}/{len(chunks)}...")
-        #         summarized = await summarize_with_llm(chunk)
-        #         summarized_chunks.append(summarized)
-
-        #     # Parse summarized chunks back into Report objects
-        #     all_reports = []
-        #     for summarized_chunk in summarized_chunks:
-        #         chunk_reports = _parse_scan_results_to_reports(summarized_chunk)
-        #         all_reports.extend(chunk_reports)
-
-        #     # Recalculate string length for next iteration
-        #     result_string = '\n'.join(str(report) for report in all_reports)
-        #     logger.info(f"Summarization complete. New length: {len(result_string)}")
-
-        logger.info(f"Security scan completed with {len(all_reports)} findings")
-        return all_reports
-
-    except Exception as e:
-        error_msg = f"Failed to perform security scan: {str(e)}"
-        logger.error(error_msg)
-        return [Report(
-            tool="System",
-            severity="ERROR",
-            description=error_msg,
-            additional_info={"error_type": "scan_failure"}
-        )]
+    logger.info("Finish running Trivy scan")
+    return all_reports
 
 
 def _parse_scan_results_to_reports(scan_results: str) -> list[Report]:
@@ -769,8 +747,8 @@ def _parse_single_line_to_report(line: str) -> Report | None:
         return Report(
             tool="Slither",
             severity=severity,
-            description=description,
-            additional_info={"contract": contract}
+            description=f"Contract {contract}: {description}",
+            language="solidity"
         )
 
     # Pattern: Secret in file.py: Description - secret
@@ -780,9 +758,8 @@ def _parse_single_line_to_report(line: str) -> Report | None:
         return Report(
             tool="Secret Scanner",
             severity="HIGH",  # Secrets are typically high severity
-            description=description.strip(),
-            file_path=file_path.strip(),
-            additional_info={"secret_type": secret.strip()}
+            description=f"{description.strip()} (Type: {secret.strip()})",
+            file_path=file_path.strip()
         )
 
     # Pattern: Secret Scanner [HIGH] in filepath: Description
@@ -807,7 +784,7 @@ def _parse_single_line_to_report(line: str) -> Report | None:
             description=message.strip(),
             file_path=file_path.strip(),
             line_number=line_num.strip(),
-            additional_info={"cwe": cwe.strip()}
+            cwe=cwe.strip()
         )
 
     # Pattern: Semgrep [MEDIUM] in filepath line X: Description (CWE: Y)
@@ -820,7 +797,7 @@ def _parse_single_line_to_report(line: str) -> Report | None:
             description=message.strip(),
             file_path=file_path.strip(),
             line_number=line_num.strip(),
-            additional_info={"cwe": cwe.strip()}
+            cwe=cwe.strip()
         )
 
     # Pattern: CodeQL [language] Issue: Description
@@ -831,7 +808,7 @@ def _parse_single_line_to_report(line: str) -> Report | None:
             tool="CodeQL",
             severity="MEDIUM",  # Default severity for CodeQL
             description=description.strip(),
-            additional_info={"language": language.strip()}
+            language=language.strip()
         )
 
     # Pattern: CodeQL [MEDIUM]: Description
@@ -869,8 +846,7 @@ def _parse_single_line_to_report(line: str) -> Report | None:
         return Report(
             tool="Unknown",
             severity="UNKNOWN",
-            description=line,
-            additional_info={"raw_line": line}
+            description=line
         )
 
     # Return None for lines that don't match any security-related patterns
@@ -890,11 +866,9 @@ def _convert_secrets_to_reports(secrets_result) -> list[Report]:
     reports = []
 
     if isinstance(secrets_result, dict) and "error" in secrets_result:
-        reports.append(Report(
+        reports.append(ErrorReport(
             tool="Secret Scanner",
-            severity="ERROR",
-            description=f"Secret scan error: {secrets_result['error']}",
-            additional_info={"error_type": "scan_failure"}
+            reason="scan_failure"
         ))
         return reports
 
@@ -914,9 +888,8 @@ def _convert_secrets_to_reports(secrets_result) -> list[Report]:
                 reports.append(Report(
                     tool="Secret Scanner",
                     severity="HIGH",
-                    description=description,
-                    file_path=current_file,
-                    additional_info={"secret_type": secret}
+                    description=f"{description} (Type: {secret})",
+                    file_path=current_file
                 ))
 
     return reports
@@ -935,22 +908,18 @@ def _convert_dependency_results_to_reports(dep_results: dict[str, Any]) -> list[
     reports = []
 
     if "error" in dep_results:
-        reports.append(Report(
+        reports.append(ErrorReport(
             tool="Dependency Scanner",
-            severity="ERROR",
-            description=f"Dependency scan error: {dep_results['error']}",
-            additional_info={"error_type": "scan_failure"}
+            reason="scan_failure"
         ))
         return reports
 
     # Process results by language
     for language, results in dep_results.items():
         if isinstance(results, dict) and "error" in results:
-            reports.append(Report(
+            reports.append(ErrorReport(
                 tool="Dependency Scanner",
-                severity="ERROR",
-                description=f"{language} dependency scan error: {results['error']}",
-                additional_info={"language": language, "error_type": "scan_failure"}
+                reason="scan_failure"
             ))
             continue
 
@@ -964,25 +933,19 @@ def _convert_dependency_results_to_reports(dep_results: dict[str, Any]) -> list[
                             if severity in file_results and file_results[severity]:
                                 for package, vulns in file_results[severity].items():
                                     for vuln in vulns:
+                                        cve_info = f" (CVE: {vuln.get('cve', 'N/A')})" if vuln.get('cve', 'N/A') != 'N/A' else ""
                                         reports.append(Report(
                                             tool="Dependency Scanner",
                                             severity=severity.upper(),
-                                            description=f"{package}: {vuln.get('advisory', 'N/A')}",
+                                            description=f"{package}: {vuln.get('advisory', 'N/A')}{cve_info}",
                                             file_path=req_file,
-                                            additional_info={
-                                                "language": language,
-                                                "package": package,
-                                                "cve": vuln.get('cve', 'N/A'),
-                                                "url": vuln.get('url', 'N/A')
-                                            }
+                                            language=language,
+                                            cwe=vuln.get('cwe', 'N/A')
                                         ))
                     elif isinstance(file_results, dict) and "error" in file_results:
-                        reports.append(Report(
+                        reports.append(ErrorReport(
                             tool="Dependency Scanner",
-                            severity="ERROR",
-                            description=f"Error scanning {req_file}: {file_results['error']}",
-                            file_path=req_file,
-                            additional_info={"language": language, "error_type": "scan_failure"}
+                            reason="scan_failure"
                         ))
 
         elif language == "solidity":
@@ -992,22 +955,17 @@ def _convert_dependency_results_to_reports(dep_results: dict[str, Any]) -> list[
                     if severity in results and results[severity]:
                         for contract, vulns in results[severity].items():
                             for vuln in vulns:
+                                impact_info = f" (Impact: {vuln.get('url', 'N/A')})" if vuln.get('url', 'N/A') != 'N/A' else ""
                                 reports.append(Report(
                                     tool="Slither",
                                     severity=severity.upper(),
-                                    description=vuln.get('advisory', 'N/A'),
-                                    additional_info={
-                                        "language": language,
-                                        "contract": contract,
-                                        "impact": vuln.get('url', 'N/A')
-                                    }
+                                    description=f"Contract {contract}: {vuln.get('advisory', 'N/A')}{impact_info}",
+                                    language=language
                                 ))
             elif isinstance(results, dict) and "error" in results:
-                reports.append(Report(
+                reports.append(ErrorReport(
                     tool="Slither",
-                    severity="ERROR",
-                    description=f"Slither scan error: {results['error']}",
-                    additional_info={"language": language, "error_type": "scan_failure"}
+                    reason="scan_failure"
                 ))
 
     return reports
@@ -1026,11 +984,9 @@ def _convert_code_quality_results_to_reports(code_results: dict[str, Any]) -> li
     reports = []
 
     if "error" in code_results:
-        reports.append(Report(
+        reports.append(ErrorReport(
             tool="Code Quality Scanner",
-            severity="ERROR",
-            description=f"Code quality scan error: {code_results['error']}",
-            additional_info={"error_type": "scan_failure"}
+            reason="scan_failure"
         ))
         return reports
 
@@ -1041,23 +997,19 @@ def _convert_code_quality_results_to_reports(code_results: dict[str, Any]) -> li
             if "results" in bandit_results:
                 for issue in bandit_results["results"]:
                     if isinstance(issue, dict):
+                        confidence_info = f" (Confidence: {issue.get('issue_confidence', 'N/A')})"
                         reports.append(Report(
                             tool="Bandit",
                             severity=issue.get("issue_severity", "MEDIUM").upper(),
-                            description=f"{issue.get('test_name', 'Unknown')}: {issue.get('issue_text', 'N/A')}",
+                            description=f"{issue.get('test_name', 'Unknown')}: {issue.get('issue_text', 'N/A')}{confidence_info}",
                             file_path=issue.get("filename"),
                             line_number=str(issue.get("line_number", "")),
-                            additional_info={
-                                "confidence": issue.get("issue_confidence", "N/A"),
-                                "test_id": issue.get("test_id", "N/A")
-                            }
+                            language="python"
                         ))
         elif isinstance(bandit_results, dict) and "error" in bandit_results:
-            reports.append(Report(
+            reports.append(ErrorReport(
                 tool="Bandit",
-                severity="ERROR",
-                description=f"Bandit scan error: {bandit_results['error']}",
-                additional_info={"error_type": "scan_failure"}
+                reason="scan_failure"
             ))
 
     # Process Semgrep results
@@ -1086,14 +1038,12 @@ def _convert_code_quality_results_to_reports(code_results: dict[str, Any]) -> li
                             description=message,
                             file_path=current_file,
                             line_number=line_info.replace('Line ', ''),
-                            additional_info={"cwe": cwe}
+                            cwe=cwe if cwe else "n/a"
                         ))
         elif isinstance(semgrep_results, dict) and "error" in semgrep_results:
-            reports.append(Report(
+            reports.append(ErrorReport(
                 tool="Semgrep",
-                severity="ERROR",
-                description=f"Semgrep scan error: {semgrep_results['error']}",
-                additional_info={"error_type": "scan_failure"}
+                reason="scan_failure"
             ))
 
     # Process CodeQL results
@@ -1110,20 +1060,18 @@ def _convert_code_quality_results_to_reports(code_results: dict[str, Any]) -> li
                                 tool="CodeQL",
                                 severity="MEDIUM",
                                 description=line.replace("Issue:", "").strip(),
-                                additional_info={"language": language}
+                                language=language
                             ))
                 elif isinstance(results, dict) and "error" in results:
-                    reports.append(Report(
+                    reports.append(ErrorReport(
                         tool="CodeQL",
-                        severity="ERROR",
-                        description=f"CodeQL scan error for {language}: {results['error']}",
-                        additional_info={"language": language, "error_type": "scan_failure"}
+                        reason="scan_failure"
                     ))
 
     return reports
 
 
-def scan_for_secrets(repo_url: str, subfolder: str = "") -> list[Report]:
+async def scan_for_secrets(repo_url: str, subfolder: str = "") -> list[Report]:
     """
     Scan a GitHub repository for exposed secrets and sensitive information.
 
@@ -1134,21 +1082,12 @@ def scan_for_secrets(repo_url: str, subfolder: str = "") -> list[Report]:
     Returns:
         A list of Report objects containing secret findings
     """
-    try:
-        repo_path = clone_repo(repo_url)
-        scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
-        secrets_result = scan_secrets_with_gitleaks(scan_path)
-        return _convert_secrets_to_reports(secrets_result)
-    except Exception as e:
-        return [Report(
-            tool="Secret Scanner",
-            severity="ERROR",
-            description=f"Failed to scan for secrets: {str(e)}",
-            additional_info={"error_type": "scan_failure"}
-        )]
+    repo_path = await sync2async(clone_repo)(repo_url)
+    scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
+    secrets_result = await sync2async(scan_secrets_with_gitleaks)(scan_path)
+    return _convert_secrets_to_reports(secrets_result)
 
-
-def scan_dependencies_vulnerabilities(repo_url: str, subfolder: str = "") -> list[Report]:
+async def scan_dependencies_vulnerabilities(repo_url: str, subfolder: str = "") -> list[Report]:
     """
     Scan a GitHub repository for vulnerable dependencies.
 
@@ -1159,39 +1098,35 @@ def scan_dependencies_vulnerabilities(repo_url: str, subfolder: str = "") -> lis
     Returns:
         A list of Report objects containing dependency vulnerability findings
     """
-    try:
-        logger.info(f"Cloning repository: {repo_url}")
-        repo_path = clone_repo(repo_url)
-        scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
-        logger.info(f"Scanning path: {scan_path}")
-        languages = detect_project_languages(scan_path)
-        logger.info(f"Detected languages: {languages}")
 
-        results = {}
+    logger.info(f"Cloning repository: {repo_url}")
+    repo_path = await sync2async(clone_repo)(repo_url)
 
-        # Python dependencies
-        if "python" in languages:
-            results["python"] = scan_dependencies_safety(scan_path)
-            logger.info("Python dependencies scanned with Safety")
-        if "javascript" in languages:
-            results["javascript"] = scan_npm_audit(scan_path)
-            logger.info("JavaScript dependencies scanned with npm audit")
-        if "solidity" in languages:
-            results["solidity"] = scan_solidity_slither(scan_path)
-            logger.info("Solidity dependencies scanned with Slither")
+    scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
+    logger.info(f"Scanning path: {scan_path}")
 
-        return _convert_dependency_results_to_reports(results)
+    languages = await sync2async(detect_project_languages)(scan_path)
+    logger.info(f"Detected languages: {languages}")
 
-    except Exception as e:
-        return [Report(
-            tool="Dependency Scanner",
-            severity="ERROR",
-            description=f"Failed to scan dependencies: {str(e)}",
-            additional_info={"error_type": "scan_failure"}
-        )]
+    results = {}
+
+    # Python dependencies
+    if "python" in languages:
+        results["python"] = await sync2async(scan_dependencies_safety)(scan_path)
+        logger.info("Python dependencies scanned with Safety")
+    
+    if "javascript" in languages:
+        results["javascript"] = await sync2async(scan_npm_audit)(scan_path)
+        logger.info("JavaScript dependencies scanned with npm audit")
+    
+    if "solidity" in languages:
+        results["solidity"] = await sync2async(scan_solidity_slither)(scan_path)
+        logger.info("Solidity dependencies scanned with Slither")
+
+    return _convert_dependency_results_to_reports(results)
 
 
-def scan_code_quality_security(repo_url: str, subfolder: str = "") -> list[Report]:
+async def scan_code_quality_security(repo_url: str, subfolder: str = "") -> list[Report]:
     """
     Perform static code analysis for security issues and code quality.
 
@@ -1202,79 +1137,40 @@ def scan_code_quality_security(repo_url: str, subfolder: str = "") -> list[Repor
     Returns:
         A list of Report objects containing code quality and security findings
     """
-    try:
-        logger.info(f"Cloning repository: {repo_url}")
-        repo_path = clone_repo(repo_url)
-        logger.info(f"Cloned repository: {repo_path}")
-        scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
-        logger.info(f"Scanning path: {scan_path}")
-        languages = detect_project_languages(scan_path)
-        logger.info(f"Detected languages: {languages}")
-        results = {}
 
-        # Python code analysis
-        if 'python' in languages:
-            results["bandit"] = scan_python_bandit(scan_path)
-            logger.info("Python code analysis completed")
-        # Multi-language analysis
-        results["semgrep"] = scan_semgrep(scan_path)
-        logger.info("Semgrep analysis completed")
-        logger.info("Running CodeQL Analysis...")
-        results["codeql"] = {}
-        for language in languages:
-            results["codeql"][language] = run_codeql_scanner(scan_path, language)
-            logger.info(f"CodeQL analysis completed for {language}")
-        logger.info("Finish running CodeQL Analysis")
-        logger.info("CodeQL Analysis completed")
+    logger.info(f"Cloning repository: {repo_url}")
 
-        return _convert_code_quality_results_to_reports(results)
+    repo_path = await sync2async(clone_repo)(repo_url)
+    logger.info(f"Cloned repository: {repo_path}")
 
-    except Exception as e:
-        return [Report(
-            tool="Code Quality Scanner",
-            severity="ERROR",
-            description=f"Failed to perform code analysis: {str(e)}",
-            additional_info={"error_type": "scan_failure"}
-        )]
+    scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
+    logger.info(f"Scanning path: {scan_path}")
 
+    languages = await sync2async(detect_project_languages)(scan_path)
+    logger.info(f"Detected languages: {languages}")
+    
+    async_scan_python_bandit = sync2async(scan_python_bandit)
+    async_scan_semgrep = sync2async(scan_semgrep)
+    async_run_codeql_scanner = sync2async(run_codeql_scanner)
 
-async def generate_security_report(repo_url: str) -> str:
-    """
-    Generate a comprehensive security report for a GitHub repository.
+    results = {}
 
-    Args:
-        repo_url: The URL of the Git repository to analyze
+    # Python code analysis
+    if 'python' in languages:
+        results["bandit"] = await async_scan_python_bandit(scan_path)
+        logger.info("Python code analysis completed")
 
-    Returns:
-        A formatted security report with findings and recommendations
-    """
-    try:
-        # Get comprehensive scan results (list of Report objects)
-        scan_results = await comprehensive_security_scan(repo_url)
+    # Multi-language analysis
+    results["semgrep"] = await async_scan_semgrep(scan_path)
+    logger.info("Semgrep analysis completed")
+    logger.info("Running CodeQL Analysis...")
+    results["codeql"] = {}
 
-        # Check if we have error reports
-        if len(scan_results) == 1 and scan_results[0].tool == "System" and scan_results[0].severity == "ERROR":
-            return f"Error generating report: {scan_results[0].description}"
+    for language in languages:
+        results["codeql"][language] = await async_run_codeql_scanner(scan_path, language)
+        logger.info(f"CodeQL analysis completed for {language}")
 
-        # Convert reports to formatted string
-        findings_text = ""
-        for report in scan_results:
-            findings_text += f"{report}\n"
+    logger.info("Finish running CodeQL Analysis")
+    logger.info("CodeQL Analysis completed")
 
-        # Add header and recommendations to the scan results
-        report = f"""# Security Analysis Report
-
-{findings_text}
-
-## Recommendations
-1. Address all critical and high-severity issues immediately
-2. Implement secret scanning in CI/CD pipeline
-3. Enable dependency vulnerability scanning
-4. Regular security audits and code reviews
-5. Follow security best practices for detected languages
-"""
-
-        return report
-
-    except Exception as e:
-        return f"Error generating security report: {str(e)}"
+    return _convert_code_quality_results_to_reports(results)
