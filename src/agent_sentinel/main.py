@@ -8,6 +8,7 @@ from typing import Any
 from . import git_utils
 from . import security_scanners
 from . import github_utils
+from .security_scanners import Report
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -106,7 +107,7 @@ async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str
 
 
 @mcp.tool()
-def scan_for_secrets(repo_url: str, subfolder: str = "") -> dict[str, Any]:
+def scan_for_secrets(repo_url: str, subfolder: str = "") -> list[Report]:
     """
     Scan a GitHub repository for exposed secrets and sensitive information.
 
@@ -115,13 +116,13 @@ def scan_for_secrets(repo_url: str, subfolder: str = "") -> dict[str, Any]:
         subfolder: Optional path to a specific subfolder within the repository
 
     Returns:
-        A report of detected secrets and sensitive information
+        A list of Report objects containing secret findings
     """
     return security_scanners.scan_for_secrets(repo_url, subfolder)
 
 
 @mcp.tool()
-def scan_dependencies_vulnerabilities(repo_url: str, subfolder: str = "") -> dict[str, Any]:
+def scan_dependencies_vulnerabilities(repo_url: str, subfolder: str = "") -> list[Report]:
     """
     Scan a GitHub repository for vulnerable dependencies.
 
@@ -130,13 +131,13 @@ def scan_dependencies_vulnerabilities(repo_url: str, subfolder: str = "") -> dic
         subfolder: Optional path to a specific subfolder within the repository
 
     Returns:
-        A report of vulnerable dependencies
+        A list of Report objects containing dependency vulnerability findings
     """
     return security_scanners.scan_dependencies_vulnerabilities(repo_url, subfolder)
 
 
 @mcp.tool()
-def scan_code_quality_security(repo_url: str, subfolder: str = "") -> dict[str, Any]:
+def scan_code_quality_security(repo_url: str, subfolder: str = "") -> list[Report]:
     """
     Perform static code analysis for security issues and code quality.
 
@@ -145,7 +146,7 @@ def scan_code_quality_security(repo_url: str, subfolder: str = "") -> dict[str, 
         subfolder: Optional path to a specific subfolder within the repository
 
     Returns:
-        A report of code quality and security issues
+        A list of Report objects containing code quality and security findings
     """
     return security_scanners.scan_code_quality_security(repo_url, subfolder)
 
