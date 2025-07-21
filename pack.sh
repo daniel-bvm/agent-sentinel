@@ -12,4 +12,4 @@ fi
 find . | grep -E "(/__pycache__$|\.pyc$|\.pyo$)" | xargs rm -rf
 
 rm -rf sentinel.zip
-zip -r sentinel.zip src config.json Dockerfile pyproject.toml system_prompt.txt
+zip -r sentinel.zip src config.json Dockerfile pyproject.toml system_prompt.txt app server.py
