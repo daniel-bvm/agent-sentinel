@@ -3,12 +3,12 @@
 from fastmcp import FastMCP
 import logging
 from dotenv import load_dotenv
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from . import git_utils
 from . import security_scanners
 from . import github_utils
-from .security_scanners import Report
+from .security_scanners import Report, ErrorReport, SeverityLevel
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -93,60 +93,65 @@ def provide_guide_for_github_access_token() -> str:
 
 
 @audit_mcp.tool()
-async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> str:
+async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> AsyncGenerator[Report | ErrorReport, None]:
     """
-    Perform a comprehensive security scan of a GitHub repository.
+    Perform a comprehensive security scan of a GitHub repository concurrently.
 
     Args:
         repo_url: The URL of the Git repository to scan
         subfolder: Optional path to a specific subfolder within the repository
 
-    Returns:
-        A formatted string with each issue on one line
+    Yields:
+        Report or ErrorReport objects as scans complete
     """
-    return await security_scanners.comprehensive_security_scan(repo_url, subfolder)
+    async for report in security_scanners.comprehensive_security_scan_concurrent(repo_url, subfolder):
+        yield report
 
 
 @audit_mcp.tool()
-async def scan_for_secrets(repo_url: str, subfolder: str = "") -> list[Report]:
+async def scan_for_secrets(repo_url: str, subfolder: str = "") -> AsyncGenerator[Report | ErrorReport, None]:
     """
-    Scan a GitHub repository for exposed secrets and sensitive information.
+    Scan a GitHub repository for exposed secrets and sensitive information concurrently.
 
     Args:
         repo_url: The URL of the Git repository to scan
         subfolder: Optional path to a specific subfolder within the repository
 
-    Returns:
-        A list of Report objects containing secret findings
+    Yields:
+        Report or ErrorReport objects containing secret findings
     """
-    return await security_scanners.scan_for_secrets(repo_url, subfolder)
+    async for report in security_scanners.scan_for_secrets_concurrent(repo_url, subfolder):
+        yield report
 
 
 @audit_mcp.tool()
-async def scan_dependencies_vulnerabilities(repo_url: str, subfolder: str = "") -> list[Report]:
+async def scan_dependencies_vulnerabilities(repo_url: str, subfolder: str = "") -> AsyncGenerator[Report | ErrorReport, None]:
     """
-    Scan a GitHub repository for vulnerable dependencies.
+    Scan a GitHub repository for vulnerable dependencies concurrently.
 
     Args:
         repo_url: The URL of the Git repository to scan
         subfolder: Optional path to a specific subfolder within the repository
 
-    Returns:
-        A list of Report objects containing dependency vulnerability findings
+    Yields:
+        Report or ErrorReport objects containing dependency vulnerability findings
     """
-    return await security_scanners.scan_dependencies_vulnerabilities(repo_url, subfolder)
+    async for report in security_scanners.scan_dependencies_vulnerabilities_concurrent(repo_url, subfolder):
+        yield report
 
 
 @audit_mcp.tool()
-async def scan_code_quality_security(repo_url: str, subfolder: str = "") -> list[Report]:
+async def scan_code_quality_security(repo_url: str, subfolder: str = "") -> AsyncGenerator[Report | ErrorReport, None]:
     """
-    Perform static code analysis for security issues and code quality.
+    Perform static code analysis for security issues and code quality concurrently.
 
     Args:
         repo_url: The URL of the Git repository to scan
         subfolder: Optional path to a specific subfolder within the repository
 
-    Returns:
-        A list of Report objects containing code quality and security findings
+    Yields:
+        Report or ErrorReport objects containing code quality and security findings
     """
-    return await security_scanners.scan_code_quality_security(repo_url, subfolder)
+    async for report in security_scanners.scan_code_quality_security_concurrent(repo_url, subfolder):
+        yield report
+
