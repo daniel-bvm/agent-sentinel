@@ -557,7 +557,16 @@ async def summarize_with_llm(content: str) -> str:
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a security analyst. Summarize the security scan results, keeping the most critical findings and their details. Maintain the format but consolidate similar issues."
+                    "content": """You are a security analyst. Summarize the security scan results, keeping the most critical findings and their details.
+
+IMPORTANT: You must maintain the exact format for each line:
+- For Slither: "Slither [SEVERITY] ContractName: Description"
+- For Secret Scanner: "Secret Scanner [HIGH] in filepath: Description"
+- For Semgrep: "Semgrep [MEDIUM] in filepath line X: Description (CWE: Y)"
+- For CodeQL: "CodeQL [MEDIUM]: Description"
+- For Trivy: "Trivy [MEDIUM]: Description"
+
+Group similar issues and keep only the most critical ones. Do not change the line format structure."""
                 },
                 {
                     "role": "user",
@@ -568,8 +577,8 @@ async def summarize_with_llm(content: str) -> str:
             temperature=0.1
         )
         # Remove the section between <think> and </think>
-        content = re.sub(r'<think>.*?</think>', '', response.choices[0].message.content, flags=re.DOTALL)
-        return content
+        result = re.sub(r'<think>.*?</think>', '', response.choices[0].message.content, flags=re.DOTALL)
+        return result
 
     except Exception as e:
         logger.error(f"Failed to summarize with LLM: {str(e)}")
@@ -715,6 +724,36 @@ async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> lis
                         ))
         logger.info("Finish running Trivy scan")
 
+        # Check if result is too long and needs summarization
+        result_string = '\n'.join(str(report) for report in all_reports)
+
+        while len(result_string) > 40000:
+            logger.info(f"Result string length ({len(result_string)}) exceeds 40000, summarizing with LLM...")
+
+            # Split reports into chunks of 100
+            chunks = []
+            for i in range(0, len(all_reports), 100):
+                chunk_reports = all_reports[i:i+100]
+                chunk_string = '\n'.join(str(report) for report in chunk_reports)
+                chunks.append(chunk_string)
+
+            # Summarize each chunk
+            summarized_chunks = []
+            for i, chunk in enumerate(chunks):
+                logger.info(f"Summarizing chunk {i+1}/{len(chunks)}...")
+                summarized = await summarize_with_llm(chunk)
+                summarized_chunks.append(summarized)
+
+            # Parse summarized chunks back into Report objects
+            all_reports = []
+            for summarized_chunk in summarized_chunks:
+                chunk_reports = _parse_scan_results_to_reports(summarized_chunk)
+                all_reports.extend(chunk_reports)
+
+            # Recalculate string length for next iteration
+            result_string = '\n'.join(str(report) for report in all_reports)
+            logger.info(f"Summarization complete. New length: {len(result_string)}")
+
         logger.info(f"Security scan completed with {len(all_reports)} findings")
         return all_reports
 
@@ -727,6 +766,160 @@ async def comprehensive_security_scan(repo_url: str, subfolder: str = "") -> lis
             description=error_msg,
             additional_info={"error_type": "scan_failure"}
         )]
+
+
+def _parse_scan_results_to_reports(scan_results: str) -> list[Report]:
+    """
+    Parse the scan results string and convert to Report objects.
+
+    Args:
+        scan_results: String containing all scan results
+
+    Returns:
+        List of Report objects
+    """
+    reports = []
+
+    if not scan_results or not scan_results.strip():
+        return reports
+
+    lines = scan_results.strip().split('\n')
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        report = _parse_single_line_to_report(line)
+        if report:
+            reports.append(report)
+
+    return reports
+
+
+def _parse_single_line_to_report(line: str) -> Report | None:
+    """
+    Parse a single line from scan results into a Report object.
+
+    Args:
+        line: A single line from the scan results
+
+    Returns:
+        Report object or None if line couldn't be parsed
+    """
+    # Pattern: Slither [SEVERITY] ContractName: Description
+    slither_match = re.match(r'^Slither \[(\w+)\] ([^:]+): (.+)$', line)
+    if slither_match:
+        severity, contract, description = slither_match.groups()
+        return Report(
+            tool="Slither",
+            severity=severity,
+            description=description,
+            additional_info={"contract": contract}
+        )
+
+    # Pattern: Secret in file.py: Description - secret
+    secret_match = re.match(r'^Secret in ([^:]+): ([^-]+) - (.+)$', line)
+    if secret_match:
+        file_path, description, secret = secret_match.groups()
+        return Report(
+            tool="Secret Scanner",
+            severity="HIGH",  # Secrets are typically high severity
+            description=description.strip(),
+            file_path=file_path.strip(),
+            additional_info={"secret_type": secret.strip()}
+        )
+
+    # Pattern: Secret Scanner [HIGH] in filepath: Description
+    secret_scanner_match = re.match(r'^Secret Scanner \[(\w+)\] in ([^:]+): (.+)$', line)
+    if secret_scanner_match:
+        severity, file_path, description = secret_scanner_match.groups()
+        return Report(
+            tool="Secret Scanner",
+            severity=severity,
+            description=description.strip(),
+            file_path=file_path.strip()
+        )
+
+    # Pattern: Semgrep file.py Line 10: Message (CWE: CWE-123)
+    # Pattern: Semgrep file.py Line 10-15: Message (CWE: CWE-123)
+    semgrep_match = re.match(r'^Semgrep ([^\s]+) Line ([^:]+): ([^(]+) \(CWE: ([^)]+)\)$', line)
+    if semgrep_match:
+        file_path, line_num, message, cwe = semgrep_match.groups()
+        return Report(
+            tool="Semgrep",
+            severity="MEDIUM",  # Default severity for Semgrep
+            description=message.strip(),
+            file_path=file_path.strip(),
+            line_number=line_num.strip(),
+            additional_info={"cwe": cwe.strip()}
+        )
+
+    # Pattern: Semgrep [MEDIUM] in filepath line X: Description (CWE: Y)
+    semgrep_new_match = re.match(r'^Semgrep \[(\w+)\] in ([^\s]+) line ([^:]+): ([^(]+) \(CWE: ([^)]+)\)$', line)
+    if semgrep_new_match:
+        severity, file_path, line_num, message, cwe = semgrep_new_match.groups()
+        return Report(
+            tool="Semgrep",
+            severity=severity,
+            description=message.strip(),
+            file_path=file_path.strip(),
+            line_number=line_num.strip(),
+            additional_info={"cwe": cwe.strip()}
+        )
+
+    # Pattern: CodeQL [language] Issue: Description
+    codeql_match = re.match(r'^CodeQL \[([^\]]+)\] Issue: (.+)$', line)
+    if codeql_match:
+        language, description = codeql_match.groups()
+        return Report(
+            tool="CodeQL",
+            severity="MEDIUM",  # Default severity for CodeQL
+            description=description.strip(),
+            additional_info={"language": language.strip()}
+        )
+
+    # Pattern: CodeQL [MEDIUM]: Description
+    codeql_new_match = re.match(r'^CodeQL \[(\w+)\]: (.+)$', line)
+    if codeql_new_match:
+        severity, description = codeql_new_match.groups()
+        return Report(
+            tool="CodeQL",
+            severity=severity,
+            description=description.strip()
+        )
+
+    # Pattern: Trivy: Description
+    trivy_match = re.match(r'^Trivy: (.+)$', line)
+    if trivy_match:
+        description = trivy_match.group(1)
+        return Report(
+            tool="Trivy",
+            severity="MEDIUM",  # Default severity for Trivy
+            description=description.strip()
+        )
+
+    # Pattern: Trivy [MEDIUM]: Description
+    trivy_new_match = re.match(r'^Trivy \[(\w+)\]: (.+)$', line)
+    if trivy_new_match:
+        severity, description = trivy_new_match.groups()
+        return Report(
+            tool="Trivy",
+            severity=severity,
+            description=description.strip()
+        )
+
+    # Generic pattern for any unmatched lines that might contain security info
+    if any(keyword in line.lower() for keyword in ['vulnerability', 'security', 'error', 'warning', 'critical']):
+        return Report(
+            tool="Unknown",
+            severity="UNKNOWN",
+            description=line,
+            additional_info={"raw_line": line}
+        )
+
+    # Return None for lines that don't match any security-related patterns
+    return None
 
 
 def scan_for_secrets(repo_url: str, subfolder: str = "") -> dict[str, Any]:
