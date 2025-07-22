@@ -53,9 +53,9 @@ RUN curl -L -o codeql.zip https://github.com/github/codeql-cli-binaries/releases
     rm -r /opt/codeql-temp
 
 # --- Install Trivy ---
-RUN wget https://github.com/aquasecurity/trivy/releases/download/v0.20.2/trivy_0.20.2_Linux-64bit.deb && \
-    dpkg -i trivy_0.20.2_Linux-64bit.deb && \
-    rm trivy_0.20.2_Linux-64bit.deb
+COPY install_trivy.sh /tmp/install_trivy.sh
+RUN chmod +x /tmp/install_trivy.sh
+RUN /tmp/install_trivy.sh
 
 WORKDIR /workspace
 
