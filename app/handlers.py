@@ -161,10 +161,11 @@ async def handle_request(
                 except Exception as e:
                     logger.error(f"Error executing toolcall: {e}", exc_info=True)
                     _result = f"Error executing toolcall: {e}"
-            else:
-                _result = result
 
-            _result = refine_mcp_response(_result, arm)
+                _result = refine_mcp_response(_result, arm)
+            else:
+                _result = refine_mcp_response(result, arm)
+                yield wrap_chunk(random_uuid(), f'<details>\n```json\n{_result}\n```\n</details>\n', "assistant")
 
             if not isinstance(_result, str):
                 try:
