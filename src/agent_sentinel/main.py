@@ -12,7 +12,7 @@ from .security_scanners import Report, ErrorReport, SeverityLevel
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.INFO,
+    level=logging.WARNING,
 )
 logger = logging.getLogger(__name__)
 

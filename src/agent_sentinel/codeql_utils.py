@@ -9,7 +9,7 @@ from threading import Lock
 single_call_lock = Lock()
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.WARNING,
     format="%(asctime)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
@@ -174,7 +174,7 @@ def analyze_codeql_database(
     logger.info(f"Analyzing CodeQL database for {scan_path} with {language}...")
     result_output_path = f"{scan_path}/results-{language}.sarif"
     ram = get_system_ram()
-    command = f"codeql database analyze -q {database_path} codeql/{language}-queries --format=sarifv2.1.0 --output={result_output_path} --ram={ram // 2}"
+    command = f"codeql database analyze -q {database_path} codeql/{language}-queries --format=sarifv2.1.0 --output={result_output_path} --ram={int(ram * 0.85)}"
     logger.debug(f"Running command: {command}")
     result = subprocess.run(command, shell=True, cwd=scan_path)
     if result.returncode != 0:

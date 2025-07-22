@@ -2,7 +2,7 @@ from app.oai_models import ChatCompletionRequest, ChatCompletionStreamResponse, 
 from typing import AsyncGenerator, Optional, Any, Callable, Union
 import asyncio
 from app.oai_streaming import create_streaming_response, ChatCompletionResponseBuilder
-from app.utils import AgentResourceManager
+from app.utils import AgentResourceManager, convert_mcp_tools_to_openai_format
 import logging
 from app.configs import settings
 from app.utils import refine_chat_history, wrap_chunk, refine_assistant_message, refine_mcp_response, execute_openai_compatible_toolcall
@@ -22,33 +22,59 @@ async def wrapstream(
         if chunk.choices[0].delta.content:
             yield chunk
 
-async def get_system_prompt(newest_message: Optional[str], personality: str = "", enable_memory: bool = True) -> str:
+async def get_system_prompt() -> str:
     if os.path.exists("system_prompt.txt"):
         with open("system_prompt.txt", "r") as f:
             return f.read()
 
     return ""
 
-from src.agent_sentinel import mcp as git_action_mcp, audit_mcp as source_code_mcp
+from src.agent_sentinel import mcp as git_action_mcp, audit_mcp as source_code_mcp, main as security_scanners
+from src.agent_sentinel.utils import merge_reports, Report, ErrorReport, SeverityLevel
 
 async def list_toolcalls() -> list[dict[str, Any]]: 
-    return [
+    res = [
         *(await git_action_mcp._mcp_list_tools()),
         *(await source_code_mcp._mcp_list_tools())
     ]
     
-print(asyncio.run(list_toolcalls()))
+    return convert_mcp_tools_to_openai_format(res)
+
+fn_mapping = {
+    'comprehensive_security_scan': security_scanners.comprehensive_security_scan.fn,
+    "scan_for_secrets": security_scanners.scan_for_secrets.fn,
+    "scan_dependencies_vulnerabilities": security_scanners.scan_dependencies_vulnerabilities.fn,
+    "scan_code_quality_security": security_scanners.scan_code_quality_security.fn
+}
 
 async def handoff(tool_name: str, tool_args: dict[str, Any]) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
-    yield
+    reports = []
+    
+    if tool_name not in fn_mapping:
+        yield wrap_chunk(random_uuid(), f"{tool_name} not found", "assistant")
+        return
+
+    fn = fn_mapping[tool_name]
+
+    async for report in fn(**tool_args):
+        report: Report | ErrorReport
+        
+        if isinstance(report, ErrorReport):
+            logger.warning(f"Error report: {report}")
+
+        yield wrap_chunk(random_uuid(), f"\n<details>{report}</details>\n", "assistant")
+        reports.append(report)
+
+    report_str = merge_reports(reports)
+    yield wrap_chunk(random_uuid(), report_str, "assistant")
 
 async def execute_toolcall_request(
     tool_name: str, 
     tool_args: dict[str, Any]
 ) -> list[Union[TextContent, EmbeddedResource]] | AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
-    for tool in source_code_mcp._mcp_list_tools():
+    for tool in await source_code_mcp._mcp_list_tools():
         if tool.name == tool_name:
-            return handoff(tool_name, tool_args)
+            return handoff(tool_name, tool_args) # async generator, no need to await
 
     return await execute_openai_compatible_toolcall(tool_name, tool_args, git_action_mcp)
 
@@ -58,11 +84,11 @@ async def handle_request(
     additional_parameters: Optional[ChatCompletionAdditionalParameters] = None
 ) -> AsyncGenerator[ChatCompletionStreamResponse, None]:
     messages = request.messages
-    assert len(messages) > 0, "No messages in the request"
+    assert len(request.messages) > 0, "No messages in the request"
 
     arm = AgentResourceManager()
 
-    system_prompt = await get_system_prompt(messages[-1].content)
+    system_prompt = await get_system_prompt()
     messages: list[dict[str, Any]] = refine_chat_history(messages, system_prompt, arm)
 
     oai_tools = await list_toolcalls()
@@ -102,7 +128,6 @@ async def handle_request(
 
         completion = await completion_builder.build()
         messages.append(refine_assistant_message(completion.choices[0].message))
-        has_success_toolcall = False
         
         toolcalls_requested = (completion.choices[0].message.tool_calls or [])
 
@@ -117,18 +142,25 @@ async def handle_request(
             _args: dict = json.loads(_args)
             _result = ""
 
-            yield wrap_chunk(random_uuid(), f"<action>Analyzing...</action>", "assistant")
-            
+            yield wrap_chunk(random_uuid(), f"<action>{_name}...</action>", "assistant")
             result = await execute_toolcall_request(_name, _args)
             
             if isinstance(result, AsyncGenerator):
-                if isinstance(chunk, ErrorResponse):
-                    raise Exception(chunk.message)
+                try:
+                    async for chunk in result:
+                        if isinstance(chunk, ErrorResponse):
+                            raise Exception(chunk.message)
 
-                chunk_content = chunk.choices[0].delta.content or ""
+                        chunk_content = chunk.choices[0].delta.content or ""
+                        stripped_chunk_content = chunk_content.strip()
 
-                if chunk_content.startswith("<details>") and chunk_content.endswith("</details>"):
-                    yield chunk
+                        if stripped_chunk_content.startswith("<details>") and stripped_chunk_content.endswith("</details>"):
+                            yield chunk
+
+                        _result += chunk_content
+                except Exception as e:
+                    logger.error(f"Error executing toolcall: {e}", exc_info=True)
+                    _result = f"Error executing toolcall: {e}"
             else:
                 _result = result
 
