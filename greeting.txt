@@ -1,0 +1,12 @@
+Hey, I'm Sentinel — your private security analysis agent.
+
+Give me your GitHub repository URL — I'll analyze them securely and identify real vulnerabilities.
+
+Try something like:
+  • Scan my repository for security vulnerabilities.
+  • Find exposed secrets and API keys in my codebase.
+  • Check my dependencies for known CVEs.
+  • Analyze my Docker and CI/CD configurations.
+  • Generate a comprehensive security report.
+
+What do you want me to secure today?
