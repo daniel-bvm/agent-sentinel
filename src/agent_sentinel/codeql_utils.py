@@ -3,6 +3,10 @@ import json_repair
 import logging
 from collections import defaultdict
 import subprocess
+import os
+from threading import Lock
+
+single_call_lock = Lock()
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -110,6 +114,16 @@ def parse_codeql_results(
 
 def download_codeql_pack(language: str) -> None:
     """Download the CodeQL pack for a given language."""
+
+    if language not in CODEQL_SUPPORTED_LANGUAGES:
+        logger.info(f"Language {language} is not supported by CodeQL. Skipping CodeQL pack download.")
+        raise RuntimeError(f"Language {language} is not supported by CodeQL.")
+    
+    # if the file is already downloaded, skip the download
+    if os.path.exists(f"codeql/{language}-queries"):
+        logger.info(f"CodeQL pack for {language} already downloaded. Skipping download.")
+        return
+
     logger.info(f"Downloading CodeQL pack for {language}...")
     command = f"codeql pack download codeql/{language}-queries"
     logger.debug(f"Running command: {command}")
@@ -117,12 +131,23 @@ def download_codeql_pack(language: str) -> None:
     if result.returncode != 0:
         logger.error(f"Failed to download CodeQL pack for {language}.")
         raise RuntimeError(f"Failed to download CodeQL pack for {language}.")
+
     logger.info(f"CodeQL pack for {language} downloaded successfully.")
 
 
 def create_codeql_database(scan_path: str, language: str) -> str:
     """Create a CodeQL database for a given path with a given language."""
     logger.info(f"Creating CodeQL database for {scan_path} with {language}...")
+    
+    if language not in CODEQL_SUPPORTED_LANGUAGES:
+        logger.info(f"Language {language} is not supported by CodeQL. Skipping CodeQL database creation.")
+        raise RuntimeError(f"Language {language} is not supported by CodeQL.")
+
+    # if the database is already created, skip the creation
+    if os.path.exists(f"{scan_path}/codeql-db-{language}"):
+        logger.info(f"CodeQL database for {scan_path} with {language} already created. Skipping creation.")
+        return f"{scan_path}/codeql-db-{language}"
+
     database_path = f"{scan_path}/codeql-db-{language}"
     command = f"codeql database create {database_path} --language={language} --build-mode=none >/dev/null 2>&1"
     logger.debug(f"Running command: {command}")
@@ -131,8 +156,13 @@ def create_codeql_database(scan_path: str, language: str) -> str:
     if result.returncode != 0:
         logger.error(f"Failed to create CodeQL database for {scan_path} with {language}.")
         raise RuntimeError(f"Failed to create CodeQL database for {scan_path} with {language}.")
+
     logger.info(f"CodeQL database for {scan_path} with {language} created successfully.")
     return database_path
+
+def get_system_ram() -> int:
+    """Get the system RAM in MB."""
+    return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") // 1024 // 1024
 
 
 def analyze_codeql_database(
@@ -143,7 +173,8 @@ def analyze_codeql_database(
     """Analyze a CodeQL database for a given path with a given language."""
     logger.info(f"Analyzing CodeQL database for {scan_path} with {language}...")
     result_output_path = f"{scan_path}/results-{language}.sarif"
-    command = f"codeql database analyze -q {database_path} codeql/{language}-queries --format=sarifv2.1.0 --output={result_output_path} --ram=2048"
+    ram = get_system_ram()
+    command = f"codeql database analyze -q {database_path} codeql/{language}-queries --format=sarifv2.1.0 --output={result_output_path} --ram={ram // 2}"
     logger.debug(f"Running command: {command}")
     result = subprocess.run(command, shell=True, cwd=scan_path)
     if result.returncode != 0:
@@ -171,7 +202,10 @@ def run_codeql_scanner(scan_path: str, language: str) -> str:
         logger.error(f"Failed to create CodeQL database for {scan_path} with {language}.")
         return f"Failed to create CodeQL database for {scan_path} with {language}."
     try:
-        result_output_path = analyze_codeql_database(scan_path, language, database_path)
+
+        with single_call_lock:
+            result_output_path = analyze_codeql_database(scan_path, language, database_path)
+
     except RuntimeError:
         logger.error(f"Failed to analyze CodeQL database for {scan_path} with {language}.")
         return f"Failed to analyze CodeQL database for {scan_path} with {language}."

@@ -1213,8 +1213,8 @@ def _convert_trivy_results_to_reports(trivy_result: tuple[str, Any]) -> list[Rep
             ))
         
         # Track current file context
-        elif "Target:" in line or line.endswith(('.json', '.txt', '.yml', '.yaml', '.toml', '.lock')):
-            current_file = line.replace("Target:", "").strip()
+        elif "Target:" in line or line.startswith("File name: ") or line.endswith(('.json', '.txt', '.yml', '.yaml', '.toml', '.lock')):
+            current_file = line.replace("Target:", "").strip() if "Target:" in line else line.replace("File name: ", "").strip()
 
     return all_reports
 
