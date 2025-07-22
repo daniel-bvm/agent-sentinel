@@ -213,6 +213,16 @@ def merge_reports(reports: list[Report | ErrorReport]) -> str:
     if len(valid_reports) == 0:
         return "No security issues found!"
 
-    df = pd.DataFrame(valid_reports)
+    report_list = [{
+        "tool": report.tool,
+        "severity": report.severity,
+        "description": report.description,
+        "file_path": report.file_path,
+        "line_number": report.line_number,
+        "language": report.language,
+        "cwe": report.cwe
+    } for report in valid_reports]
+
+    df = pd.DataFrame(report_list)
     return generate_compact_report(df)
     
