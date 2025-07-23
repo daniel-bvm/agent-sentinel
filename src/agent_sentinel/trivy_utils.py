@@ -22,24 +22,6 @@ SEVERITY_MAPPING = {
     "UNKNOWN": SeverityLevel.LOW
 }
 
-# Common CVE to CWE mappings for dependencies
-CVE_TO_CWE = {
-    "injection": "CWE-74",     # Improper Neutralization of Special Elements
-    "xss": "CWE-79",           # Cross-site Scripting
-    "sql": "CWE-89",           # SQL Injection
-    "csrf": "CWE-352",         # Cross-Site Request Forgery
-    "auth": "CWE-287",         # Improper Authentication
-    "crypto": "CWE-327",       # Use of a Broken or Risky Cryptographic Algorithm
-    "deserial": "CWE-502",     # Deserialization of Untrusted Data
-    "path": "CWE-22",          # Path Traversal
-    "memory": "CWE-119",       # Improper Restriction of Operations within Bounds
-    "buffer": "CWE-120",       # Buffer Copy without Checking Size of Input
-}
-
-
-
-
-
 def _run_trivy_scan(scan_path: str) -> str | None:
     """Run Trivy scan and return the report."""
     result_path = f"{scan_path}/trivy-report.json"
@@ -75,11 +57,6 @@ def _parse_trivy_report(report_path: str) -> list[Report]:
             vuln_title = vulnerability.get("Title", "").lower()
             vuln_description = vulnerability.get("Description", "").lower()
             combined_text = f"{vuln_title} {vuln_description}"
-
-            for vuln_type, mapped_cwe in CVE_TO_CWE.items():
-                if vuln_type in combined_text:
-                    cwe = mapped_cwe
-                    break
 
             # Enhanced description with context
             description_parts = []

@@ -1,6 +1,11 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
 from lxml import etree
+import os, requests
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class CWEWeakness:
@@ -72,3 +77,95 @@ def parse_cwe_weaknesses(xml_path: str) -> List[CWEWeakness]:
     return weaknesses
 
 DEFINITION_LINK_FMT = "https://cwe.mitre.org/data/definitions/{cwe_id}.html"
+DB_URL = "https://cwe.mitre.org/data/xml/cwec_latest.xml.zip"
+DB_LOCAL_PATH = "/storage/cwec_latest.xml.zip"
+
+
+from functools import lru_cache
+import zipfile
+import time 
+import tempfile
+import glob
+import re
+
+def validate_local_db(path: str) -> bool:
+    last_updated = os.path.getmtime(path)
+    
+    if last_updated < time.time() - 86400:
+        return False
+
+    return True
+
+def download_db() -> str | None:
+    global DB_URL, DB_LOCAL_PATH
+    
+
+    tmp_file = f"{DB_LOCAL_PATH}.tmp"
+    try:
+        resp = requests.get(DB_URL)
+
+        assert resp.status_code == 200, f"Failed to download CWE database: {resp.status_code}"
+
+        with open(tmp_file, 'wb') as f:
+            f.write(resp.content)
+
+        return tmp_file
+    except Exception as err:
+        return None
+
+@lru_cache(maxsize=1)
+def get_db() -> List[CWEWeakness]:
+    global DB_URL
+
+    if not os.path.exists(DB_LOCAL_PATH) or not validate_local_db(DB_LOCAL_PATH):
+        newly_file = download_db()
+
+        if newly_file is not None and os.path.exists(newly_file):
+            os.rename(newly_file, DB_LOCAL_PATH)
+
+    if not os.path.exists(DB_LOCAL_PATH):
+        logger.error(f"CWE database not found: {DB_LOCAL_PATH}")
+        return []
+
+    with zipfile.ZipFile(DB_LOCAL_PATH, 'r') as zip_ref, tempfile.TemporaryDirectory() as tmp_dir:
+        os.makedirs(tmp_dir, exist_ok=True)
+
+        try:
+            zip_ref.extractall(tmp_dir)
+        except Exception as err:
+            logger.error(f"Failed to extract CWE database: {err}")
+            return []
+    
+        xml_files = glob.glob(os.path.join(tmp_dir, '*.xml')) 
+        
+        if len(xml_files) == 0:
+            logger.error(f"No XML files found in the CWE database: {tmp_dir}")
+            return []
+        
+        if len(xml_files) > 1:
+            logger.warning(f"Multiple XML files found in the CWE database: {xml_files}")
+
+        xml_file = xml_files[0]
+        return parse_cwe_weaknesses(xml_file)
+    
+def get_cwe_by_id(cwe_id: str | int) -> CWEWeakness | None:
+    if isinstance(cwe_id, str):
+        pat = re.compile(r"\d+")
+        cwe_ids = pat.findall(cwe_id)
+
+        if len(cwe_ids) == 0:
+            return None
+        
+        if len(cwe_ids) > 1:
+            logger.warning(f"Multiple CWE IDs found in the CWE ID: {cwe_id}")
+
+        cwe_id = cwe_ids[0]
+
+    else:
+        cwe_id = str(cwe_id)
+
+    for weakness in get_db():
+        if weakness.id == cwe_id:
+            return weakness
+
+    return None

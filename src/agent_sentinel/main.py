@@ -25,16 +25,7 @@ load_dotenv()
 @mcp.tool()
 def git_directory_structure(repo_url: str, subfolder: str = "", max_depth: int = None, branch_name: str = None) -> str:
     """
-    Clone a Git repository and return its directory structure in a tree format.
-
-    Args:
-        repo_url: The URL of the Git repository
-        subfolder: Optional path to a specific subfolder within the repository (e.g., "src", "docs/api")
-        max_depth: Optional maximum depth to traverse (useful for large repositories)
-        branch_name: Optional branch name to checkout before scanning (defaults to main/master branch)
-
-    Returns:
-        A string representation of the repository's directory structure
+    Clone a Git repository and return its directory structure in a tree format
     """
     return git_utils.git_directory_structure(repo_url, subfolder, max_depth, branch_name)
 
@@ -58,15 +49,7 @@ def provide_guide_for_github_access_token() -> str:
 @audit_mcp.tool()
 async def comprehensive_security_scan(repo_url: str, subfolder: str = "", branch_name: str = None) -> AsyncGenerator[Report | ErrorReport, None]:
     """
-    Perform a comprehensive security scan of a GitHub repository concurrently.
-
-    Args:
-        repo_url: The URL of the Git repository to scan
-        subfolder: Optional path to a specific subfolder within the repository
-        branch_name: Optional branch name to checkout before scanning (defaults to main/master branch)
-
-    Yields:
-        Report or ErrorReport objects as scans complete
+    Perform a comprehensive security scan of a GitHub repository and get the report.
     """
     async for report in security_scanners.comprehensive_security_scan_concurrent(repo_url, subfolder, branch_name):
         yield report
