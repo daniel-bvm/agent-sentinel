@@ -199,7 +199,7 @@ def generate_compact_report(df: pd.DataFrame) -> str:
 
 def merge_reports(reports: list[Report | ErrorReport]) -> str:
     """Merge reports into a single string."""
-    valid_reports = [
+    valid_reports: list[Report] = [
         report for report in reports if 
         not isinstance(report, ErrorReport)
         and report.severity != SeverityLevel.ERROR 
@@ -220,7 +220,8 @@ def merge_reports(reports: list[Report | ErrorReport]) -> str:
         "file_path": report.file_path,
         "line_number": report.line_number,
         "language": report.language,
-        "cwe": report.cwe
+        "cwe": report.cwe,
+        "cve": report.cve
     } for report in valid_reports]
 
     df = pd.DataFrame(report_list)

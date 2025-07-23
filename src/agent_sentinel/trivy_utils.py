@@ -61,6 +61,11 @@ def _parse_trivy_report(report_path: str) -> list[Report]:
             # Enhanced description with context
             description_parts = []
 
+            # Add vulnerability details
+            vuln_id = vulnerability.get("VulnerabilityID", "")
+            if vuln_id:
+                description_parts.append(f"ID: {vuln_id}")
+
             # Add package information
             pkg_name = vulnerability.get("PkgName", "")
             if pkg_name:
@@ -68,16 +73,12 @@ def _parse_trivy_report(report_path: str) -> list[Report]:
 
             installed_version = vulnerability.get("InstalledVersion", "")
             if installed_version:
-                description_parts.append(f"Installed: {installed_version}")
+                description_parts.append(f"Installed version: {installed_version}")
 
             fixed_version = vulnerability.get("FixedVersion", "")
             if fixed_version:
                 description_parts.append(f"Fixed in: {fixed_version}")
 
-            # Add vulnerability details
-            vuln_id = vulnerability.get("VulnerabilityID", "")
-            if vuln_id:
-                description_parts.append(f"ID: {vuln_id}")
 
             title = vulnerability.get("Title", "")
             if title:
@@ -87,13 +88,13 @@ def _parse_trivy_report(report_path: str) -> list[Report]:
             cwe_ids = vulnerability.get("CweIDs", [])
             if cwe_ids:
                 cwe = ", ".join(cwe_ids)
-                description_parts.append(f"CWE: {cwe}")
+                # description_parts.append(f"CWE: {cwe}")
 
             # Combine all parts
             if description_parts:
-                description = " | ".join(description_parts)
+                description = ", ".join(description_parts)
             else:
-                description = "Unknown vulnerability"
+                description = ""
 
             # Determine language from file extension
             language = "code"
@@ -122,7 +123,8 @@ def _parse_trivy_report(report_path: str) -> list[Report]:
                 file_path=file_name if file_name else None,
                 line_number=None,  # Trivy typically doesn't provide line numbers
                 language=language,
-                cwe=cwe
+                cwe=cwe,
+                cve=vuln_id
             )
 
             reports.append(report)

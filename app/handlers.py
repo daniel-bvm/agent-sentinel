@@ -142,7 +142,7 @@ async def handle_request(
             _args: dict = json.loads(_args)
             _result = ""
 
-            yield wrap_chunk(random_uuid(), f"<action>{_name}...</action>", "assistant")
+            yield wrap_chunk(random_uuid(), f"<action>Running {_name}...</action>", "assistant")
             result = await execute_toolcall_request(_name, _args)
             
             if isinstance(result, AsyncGenerator):

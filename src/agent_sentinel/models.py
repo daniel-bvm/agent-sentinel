@@ -100,7 +100,8 @@ class Report:
         file_path: str | None = None,
         line_number: str | None = None,
         language: str = "code",
-        cwe: str = "n/a"
+        cwe: str | None = None,
+        cve: str | None = None
     ):
         """
         Initialize a security report.
@@ -127,12 +128,13 @@ class Report:
                 self.severity = SeverityLevel.UNKNOWN
         else:
             self.severity = SeverityLevel.UNKNOWN
-            
+
         self.description = description
         self.file_path = file_path
         self.line_number = line_number
         self.language = language
         self.cwe = cwe
+        self.cve = cve
 
     def __str__(self) -> str:
         """String representation of the report."""
@@ -150,7 +152,7 @@ class Report:
 
     def __repr__(self) -> str:
         """Detailed representation of the report."""
-        return f"Report(tool='{self.tool}', severity='{self.severity}', description='{self.description}', file_path='{self.file_path}', line_number='{self.line_number}', language='{self.language}', cwe='{self.cwe}')"
+        return f"Report(tool='{self.tool}', severity='{self.severity}', description='{self.description}', file_path='{self.file_path}', line_number='{self.line_number}', language='{self.language}', cwe='{self.cwe}', cve='{self.cve}')"
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the report to a dictionary."""
@@ -161,7 +163,8 @@ class Report:
             "file_path": self.file_path,
             "line_number": self.line_number,
             "language": self.language,
-            "cwe": self.cwe
+            "cwe": self.cwe,
+            "cve": self.cve
         }
 
 
