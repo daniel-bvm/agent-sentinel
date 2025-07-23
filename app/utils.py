@@ -19,13 +19,13 @@ def get_file_extension(uri: str) -> str:
     logger.info(f"received uri: {uri[:100]}")
     if uri.startswith('data:'):
         return uri.split(';')[0].split('/')[-1].lower()
-    
+
     if uri.startswith('http'):
         return uri.split('.')[-1].lower()
-    
+
     if uri.startswith('file:'):
         return uri.split('.')[-1].lower()
-    
+
     return None
 
 class Attachment:
@@ -73,7 +73,7 @@ class AgentResourceManager:
             return f'"{self.resources.get(resource_id, resource_id)}"'
 
         return self.resource_citing_pattern.sub(replace_with_data_uri, content)
-    
+
     def add_attachment(self, data_uri: str, name: Optional[str] = None) -> Attachment:
         attachment = Attachment(data_uri, name)
         self.attachments.append(attachment)
@@ -134,17 +134,17 @@ def batching(generator: Union[Generator[T, None, None], List[T]], batch_size: in
 
     else:
         raise ValueError("Generator must be a generator or a list")
-    
+
 
 def convert_mcp_tools_to_openai_format(
     mcp_tools: List[Any]
 ) -> List[Dict[str, Any]]:
     """Convert MCP tool format to OpenAI tool format"""
     openai_tools = []
-    
+
     logger.debug(f"Input mcp_tools type: {type(mcp_tools)}")
     logger.debug(f"Input mcp_tools: {mcp_tools}")
-    
+
     # Extract tools from the response
     if hasattr(mcp_tools, 'tools'):
         tools_list = mcp_tools.tools
@@ -155,10 +155,10 @@ def convert_mcp_tools_to_openai_format(
     else:
         tools_list = mcp_tools
         logger.debug("Using mcp_tools directly as list")
-        
+
     logger.debug(f"Tools list type: {type(tools_list)}")
     logger.debug(f"Tools list: {tools_list}")
-    
+
     # Process each tool in the list
     if isinstance(tools_list, list):
         logger.debug(f"Processing {len(tools_list)} tools")
@@ -167,14 +167,14 @@ def convert_mcp_tools_to_openai_format(
             if hasattr(tool, 'name') and hasattr(tool, 'description'):
                 openai_name = sanitize_tool_name(tool.name)
                 logger.debug(f"Tool has required attributes. Name: {tool.name}")
-                
+
                 tool_schema = getattr(tool, 'inputSchema', {})
                 (tool_schema.setdefault(k, v) for k, v in {
                     "type": "object",
                     "properties": {},
                     "required": []
-                }.items()) 
-                                
+                }.items())
+
                 openai_tool = {
                     "type": "function",
                     "function": {
@@ -194,7 +194,7 @@ def convert_mcp_tools_to_openai_format(
                 )
     else:
         logger.debug(f"Tools list is not a list, it's a {type(tools_list)}")
-    
+
     return openai_tools
 
 def sanitize_tool_name(name: str) -> str:
@@ -204,7 +204,7 @@ def sanitize_tool_name(name: str) -> str:
 
 def compare_toolname(openai_toolname: str, mcp_toolname: str) -> bool:
     return sanitize_tool_name(mcp_toolname) == openai_toolname
-    
+
 async def execute_openai_compatible_toolcall(
     toolname: str, arguments: Dict[str, Any], mcp: fastmcp.FastMCP
 ) -> list[Union[TextContent, EmbeddedResource]]:
@@ -221,13 +221,13 @@ async def execute_openai_compatible_toolcall(
             "More than one tool has the same santizied"
             " name to the requested tool"
         )
-        
+
     elif len(candidate) == 0:
         return CallToolResult(
-            content=[TextContent(text=f"Tool {toolname} not found", type="text")], 
+            content=[TextContent(text=f"Tool {toolname} not found", type="text")],
             isError=True
         )
-        
+
     toolname = candidate[0].name
 
     try:
@@ -235,16 +235,16 @@ async def execute_openai_compatible_toolcall(
 
         if isinstance(res, tuple) and len(res) == 2:
             res = res[1].get("result", "empty result")
-  
+
     except Exception as e:
         logger.error(f"Error executing tool {toolname} with arguments {arguments}: {e}")
         return CallToolResult(
-            content=[TextContent(text=f"Error executing tool {toolname}: {e}", type="text")], 
+            content=[TextContent(text=f"Error executing tool {toolname}: {e}", type="text")],
             isError=True
         )
 
     return res
-    
+
 def strip_marker(content: str, marker: str, outter_only: bool = False, replace: str = "") -> str:
     # Remove self-closing tags like <marker ... />
     self_closing_pat = re.compile(f"<{marker}\\b[^>]*/>", re.IGNORECASE)
@@ -300,11 +300,11 @@ def refine_mcp_response(something: Any, arm: AgentResourceManager, skip_embed_re
             something = arm.embed_resource(something)
 
         return strip_markers(
-            something, 
+            something,
             (
-                ("agent_message", True), 
-                ("think", False), 
-                ("details", False), 
+                ("agent_message", True),
+                ("think", False),
+                ("details", False),
                 ("action", False)
             )
         ).strip()
@@ -328,7 +328,7 @@ def refine_chat_history(messages: list[dict[str, str]], system_prompt: str, arm:
             has_system_prompt = True
             refined_messages.append(message)
             continue
-    
+
         if isinstance(message, dict) \
             and message.get('role', 'undefined') == 'user' \
             and isinstance(message.get('content'), list):
@@ -367,11 +367,11 @@ def refine_chat_history(messages: list[dict[str, str]], system_prompt: str, arm:
             _message = {
                 "role": message.get('role', 'assistant'),
                 "content": strip_markers(
-                    embeded_content, 
+                    embeded_content,
                     (
-                        ("agent_message", False), 
-                        ("think", False), 
-                        ("details", False), 
+                        ("agent_message", False),
+                        ("think", False),
+                        ("details", False),
                         ("action", False)
                     )
                 )
@@ -396,18 +396,18 @@ def refine_chat_history(messages: list[dict[str, str]], system_prompt: str, arm:
 def refine_assistant_message(
     assistant_message: Union[dict[str, str], BaseModel]
 ) -> dict[str, str]:
-    
+
     if isinstance(assistant_message, BaseModel):
         assistant_message = assistant_message.model_dump()
 
     if 'content' in assistant_message:
         assistant_message['content'] = strip_markers(
-            assistant_message['content'] or "", 
+            assistant_message['content'] or "",
             (
-                ("agent_message", False), 
-                ("think", False), 
-                ("details", False), 
-                ("img", False), 
+                ("agent_message", False),
+                ("think", False),
+                ("details", False),
+                ("img", False),
                 ("action", False)
             )
         )
@@ -418,7 +418,7 @@ def refine_assistant_message(
 def get_newest_message(messages: list[ChatCompletionMessageParam]) -> str:
     if isinstance(messages[-1].get("content", ""), str):
         return messages[-1].get("content", "")
-    
+
     elif isinstance(messages[-1].get("content", []), list):
         for item in messages[-1].get("content", []):
             if item.get("type") == "text":
@@ -426,11 +426,11 @@ def get_newest_message(messages: list[ChatCompletionMessageParam]) -> str:
 
     else:
         raise ValueError(f"Invalid message content: {messages[-1].get('content')}")
-    
+
 
 async def wrap_toolcall_request(uuid: str, fn_name: str, args: dict[str, Any]) -> ChatCompletionStreamResponse:
     args_str = json.dumps(args, indent=2)
-    
+
     template = f'''
 <action>Executing <b>{fn_name}</b></action>
 
@@ -510,7 +510,7 @@ from app.utils import AgentResourceManager, strip_markers, get_file_extension
 
 def create_attachment(data_uri: str, base_name: str) -> dict:
     ext = get_file_extension(data_uri) or 'data'
-    
+
     # is image
     if ext in ['png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'heif']:
         return {
@@ -527,11 +527,11 @@ def create_attachment(data_uri: str, base_name: str) -> dict:
             "file_data": data_uri,
         }
     }
-    
+
 
 def create_rich_user_message(message: str, arm: AgentResourceManager) -> dict[str, Any]:
     attachments: list[str] = arm.extract_resource(message)
-    
+
     if len(attachments) == 0:
         return {
             "role": "user",
@@ -539,7 +539,7 @@ def create_rich_user_message(message: str, arm: AgentResourceManager) -> dict[st
         }
 
     message = strip_markers(
-        message, 
+        message,
         (
             ("img", False),
             ("file", False),

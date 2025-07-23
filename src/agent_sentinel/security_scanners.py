@@ -49,14 +49,14 @@ def _convert_bandit_to_reports(bandit_result: dict[str, Any]) -> list[Report]:
                         severity = SeverityLevel(bandit_severity)
                     except ValueError:
                         severity = SeverityLevel.MEDIUM
-                    
+
                     # Extract CWE from test_id or test_name
                     test_id = issue.get("test_id", "")
                     cwe = "n/a"
                     if test_id:
                         # Bandit test IDs often correspond to CWEs
                         cwe = cwe_mapping.get(test_id, f"Bandit-{test_id}")
-                    
+
                     # Enhanced description with more context
                     description_parts = [issue.get('test_name', 'Unknown Security Test')]
                     if issue.get('issue_text'):
@@ -64,7 +64,7 @@ def _convert_bandit_to_reports(bandit_result: dict[str, Any]) -> list[Report]:
                     if issue.get('more_info'):
                         description_parts.append(f"More info: {issue.get('more_info')}")
                     enhanced_description = ": ".join(description_parts) + confidence_info
-                    
+
                     reports.append(Report(
                         tool="Bandit",
                         severity=severity,
@@ -97,7 +97,7 @@ def _convert_safety_to_reports(safety_result: dict[str, Any]) -> list[Report]:
                                     severity_level = SeverityLevel(severity.upper())
                                 except ValueError:
                                     severity_level = SeverityLevel.MEDIUM
-                                
+
                                 reports.append(Report(
                                     tool="Safety",
                                     severity=severity_level,
@@ -113,13 +113,13 @@ def _convert_safety_to_reports(safety_result: dict[str, Any]) -> list[Report]:
                 ))
     else:
         reports.append(ErrorReport(
-            tool="Safety", 
+            tool="Safety",
             reason="scan_failure"
         ))
     return reports
 
 def _convert_npm_audit_to_reports(npm_result: dict[str, Any]) -> list[Report]:
-    """Convert npm audit results to Report objects.""" 
+    """Convert npm audit results to Report objects."""
     reports = []
     if isinstance(npm_result, dict) and "error" not in npm_result:
         for severity in ["high", "medium", "low"]:
@@ -132,7 +132,7 @@ def _convert_npm_audit_to_reports(npm_result: dict[str, Any]) -> list[Report]:
                             severity_level = SeverityLevel(severity.upper())
                         except ValueError:
                             severity_level = SeverityLevel.MEDIUM
-                        
+
                         # Enhanced description with package version and dependency path
                         description_parts = [f"Package {package}"]
                         if vuln.get('advisory'):
@@ -142,7 +142,7 @@ def _convert_npm_audit_to_reports(npm_result: dict[str, Any]) -> list[Report]:
                         if vuln.get('vulnerable_versions'):
                             description_parts.append(f"Vulnerable versions: {vuln.get('vulnerable_versions')}")
                         enhanced_description = ": ".join(description_parts) + cve_info
-                        
+
                         reports.append(Report(
                             tool="npm audit",
                             severity=severity_level,
@@ -158,19 +158,20 @@ def _convert_npm_audit_to_reports(npm_result: dict[str, Any]) -> list[Report]:
         ))
     return reports
 
-async def comprehensive_security_scan_concurrent(repo_url: str, subfolder: str = "") -> AsyncGenerator[Report | ErrorReport, None]:
+async def comprehensive_security_scan_concurrent(repo_url: str, subfolder: str = "", branch_name: str = None) -> AsyncGenerator[Report | ErrorReport, None]:
     """
     Perform a comprehensive security scan of a GitHub repository concurrently.
 
     Args:
         repo_url: The URL of the Git repository to scan
         subfolder: Optional path to a specific subfolder within the repository
+        branch_name: Optional branch name to checkout before scanning
 
     Yields:
         Report or ErrorReport objects as scans complete
     """
-    # Clone the repository
-    repo_path = await sync2async(clone_repo)(repo_url)
+    # Clone the repository and checkout branch if specified
+    repo_path = await sync2async(clone_repo)(repo_url, branch_name)
     scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
 
     # Detect languages
@@ -220,25 +221,26 @@ async def comprehensive_security_scan_concurrent(repo_url: str, subfolder: str =
             logger.warning(f"No post-processor found for {identity}")
             yield ErrorReport(tool=identity, reason="no_post_processor")
 
-async def scan_for_secrets_concurrent(repo_url: str, subfolder: str = "") -> AsyncGenerator[Report | ErrorReport, None]:
+async def scan_for_secrets_concurrent(repo_url: str, subfolder: str = "", branch_name: str = None) -> AsyncGenerator[Report | ErrorReport, None]:
     """
     Scan a GitHub repository for exposed secrets and sensitive information concurrently.
 
     Args:
         repo_url: The URL of the Git repository to scan
         subfolder: Optional path to a specific subfolder within the repository
+        branch_name: Optional branch name to checkout before scanning
 
     Yields:
         Report or ErrorReport objects containing secret findings
     """
-    repo_path = await sync2async(clone_repo)(repo_url)
+    repo_path = await sync2async(clone_repo)(repo_url, branch_name)
     scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
-    
+
     # Create single task for secrets scanning
     task = a_stupid_wrapper("secrets", sync2async(scan_secrets_with_gitleaks)(scan_path))
-    
+
     identity, result = await task
-    
+
     post_processor = TOOL_POST_PROCESSORS.get(identity)
     if post_processor:
         try:
@@ -254,18 +256,19 @@ async def scan_for_secrets_concurrent(repo_url: str, subfolder: str = "") -> Asy
     else:
         yield ErrorReport(tool=identity, reason="no_post_processor")
 
-async def scan_dependencies_vulnerabilities_concurrent(repo_url: str, subfolder: str = "") -> AsyncGenerator[Report | ErrorReport, None]:
+async def scan_dependencies_vulnerabilities_concurrent(repo_url: str, subfolder: str = "", branch_name: str = None) -> AsyncGenerator[Report | ErrorReport, None]:
     """
     Scan a GitHub repository for vulnerable dependencies concurrently.
 
     Args:
         repo_url: The URL of the Git repository to scan
         subfolder: Optional path to a specific subfolder within the repository
+        branch_name: Optional branch name to checkout before scanning
 
     Yields:
         Report or ErrorReport objects containing dependency vulnerability findings
     """
-    repo_path = await sync2async(clone_repo)(repo_url)
+    repo_path = await sync2async(clone_repo)(repo_url, branch_name)
 
     scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
 
@@ -277,10 +280,10 @@ async def scan_dependencies_vulnerabilities_concurrent(repo_url: str, subfolder:
     # Python dependencies
     if "python" in languages:
         tasks.append(a_stupid_wrapper("safety", sync2async(scan_dependencies_safety)(scan_path)))
-    
+
     if "javascript" in languages:
         tasks.append(a_stupid_wrapper("npm_audit", sync2async(scan_npm_audit)(scan_path)))
-    
+
     if "solidity" in languages:
         tasks.append(a_stupid_wrapper("slither", sync2async(scan_solidity_slither)(scan_path)))
 
@@ -304,24 +307,25 @@ async def scan_dependencies_vulnerabilities_concurrent(repo_url: str, subfolder:
             logger.warning(f"No post-processor found for {identity}")
             yield ErrorReport(tool=identity, reason="no_post_processor")
 
-async def scan_code_quality_security_concurrent(repo_url: str, subfolder: str = "") -> AsyncGenerator[Report | ErrorReport, None]:
+async def scan_code_quality_security_concurrent(repo_url: str, subfolder: str = "", branch_name: str = None) -> AsyncGenerator[Report | ErrorReport, None]:
     """
     Perform static code analysis for security issues and code quality concurrently.
 
     Args:
         repo_url: The URL of the Git repository to scan
         subfolder: Optional path to a specific subfolder within the repository
+        branch_name: Optional branch name to checkout before scanning
 
     Yields:
         Report or ErrorReport objects containing code quality and security findings
     """
 
-    repo_path = await sync2async(clone_repo)(repo_url)
+    repo_path = await sync2async(clone_repo)(repo_url, branch_name)
 
     scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
 
     languages = await sync2async(detect_project_languages)(scan_path)
-    
+
     # Prepare concurrent tasks
     tasks = []
 
@@ -570,10 +574,10 @@ def scan_solidity_slither(scan_path: str) -> dict[str, Any]:
     try:
         with open(slither_output, "r") as f:
             slither_data = json_repair.load(f)
-        
+
         # Clean up the output file
         os.remove(slither_output)
-        
+
         # Return the raw results with scan_path for file path cleaning
         return {
             "raw_results": slither_data,
@@ -680,10 +684,10 @@ def scan_secrets_with_gitleaks(scan_path: str) -> dict[str, Any]:
     try:
         with open(output_path, "r") as f:
             json_data = json_repair.load(f)
-        
+
         # Clean up output file
         os.remove(output_path)
-        
+
         # Return raw results with scan_path for file path cleaning
         return {
             "raw_results": json_data,
@@ -728,28 +732,28 @@ async def a_stupid_wrapper(identity: str, awaitable_task: Awaitable) -> tuple[st
         return identity, result
     except Exception as e:
         return identity, e
-    
+
 def _parse_slither_result(slither_result: dict[str, Any]) -> list[Report]:
     """Parse raw Slither JSON results and convert to Report objects."""
     all_reports = []
-    
+
     if "error" in slither_result:
         all_reports.append(ErrorReport(
             tool="Slither",
             reason=slither_result["error"]
         ))
         return all_reports
-    
+
     if "raw_results" not in slither_result:
         all_reports.append(ErrorReport(
             tool="Slither",
             reason="No raw results found in Slither output"
         ))
         return all_reports
-    
+
     raw_data = slither_result["raw_results"]
     scan_path = slither_result.get("scan_path", "")
-    
+
     # Map Slither impact levels to CWE categories and severity
     impact_to_cwe_severity = {
         "High": {"cwe": "CWE-664", "severity": SeverityLevel.HIGH},      # Improper Control of a Resource
@@ -758,27 +762,27 @@ def _parse_slither_result(slither_result: dict[str, Any]) -> list[Report]:
         "Informational": {"cwe": "CWE-1078", "severity": SeverityLevel.LOW}, # Inappropriate Source Code Style or Formatting
         "Optimization": {"cwe": "CWE-1041", "severity": SeverityLevel.LOW}   # Use of Redundant Code
     }
-    
+
     # Process detector results
     detectors = raw_data.get("results", {}).get("detectors", [])
     for detector in detectors:
         if not isinstance(detector, dict):
             continue
-            
+
         # Extract basic information
         check_name = detector.get("check", "Unknown")
         impact = detector.get("impact", "Medium")
         confidence = detector.get("confidence", "Unknown")
         description = detector.get("description", "No description available")
-        
+
         # Map impact to CWE and severity
         cwe_info = impact_to_cwe_severity.get(impact, {"cwe": "CWE-664", "severity": SeverityLevel.MEDIUM})
-        
+
         # Extract file and line information from elements
         elements = detector.get("elements", [])
         file_path = None
         line_number = None
-        
+
         # Find the primary source location
         for element in elements:
             if isinstance(element, dict) and element.get("type") in ["contract", "function", "variable"]:
@@ -794,12 +798,12 @@ def _parse_slither_result(slither_result: dict[str, Any]) -> list[Report]:
                         else:
                             line_number = f"{lines[0]}-{lines[-1]}"
                     break
-        
+
         # Enhanced description with confidence and check type
         enhanced_description = f"{check_name}: {description}"
         if confidence != "Unknown":
             enhanced_description += f" (Confidence: {confidence})"
-        
+
         all_reports.append(Report(
             tool="Slither",
             severity=cwe_info["severity"],
@@ -809,14 +813,14 @@ def _parse_slither_result(slither_result: dict[str, Any]) -> list[Report]:
             language="solidity",
             cwe=cwe_info["cwe"]
         ))
-    
+
     # Process compilation warnings/errors if present
     compilation_errors = raw_data.get("results", {}).get("compilation_errors", [])
     for error in compilation_errors:
         if isinstance(error, dict):
             error_type = error.get("type", "compilation_error")
             message = error.get("message", "Unknown compilation error")
-            
+
             all_reports.append(Report(
                 tool="Slither",
                 severity=SeverityLevel.WARNING,
@@ -824,7 +828,7 @@ def _parse_slither_result(slither_result: dict[str, Any]) -> list[Report]:
                 language="solidity",
                 cwe="CWE-1100"  # Insufficient Isolation or Compartmentalization
             ))
-    
+
     return all_reports
 
 def _parse_codeql_result(codeql_result: str | list[Report], language: str) -> list[Report]:
@@ -854,7 +858,7 @@ def _parse_codeql_result(codeql_result: str | list[Report], language: str) -> li
     # Map CodeQL rule levels to severity and CWE
     level_to_severity_cwe = {
         "error": {"severity": SeverityLevel.HIGH, "cwe": "CWE-754"},      # Improper Check for Unusual or Exceptional Conditions
-        "warning": {"severity": SeverityLevel.MEDIUM, "cwe": "CWE-703"}, # Improper Check or Handling of Exceptional Conditions  
+        "warning": {"severity": SeverityLevel.MEDIUM, "cwe": "CWE-703"}, # Improper Check or Handling of Exceptional Conditions
         "note": {"severity": SeverityLevel.LOW, "cwe": "CWE-1078"},      # Inappropriate Source Code Style or Formatting
         "info": {"severity": SeverityLevel.LOW, "cwe": "CWE-1078"},
     }
@@ -863,21 +867,21 @@ def _parse_codeql_result(codeql_result: str | list[Report], language: str) -> li
     lines = codeql_result.strip().split('\n')
     current_issue = None
     current_description = ""
-    
+
     for line in lines:
         line = line.strip()
         if not line:
             continue
-            
+
         if line.startswith("Issue:"):
             # Save previous issue if exists
             if current_issue:
                 all_reports.append(current_issue)
-            
+
             # Start new issue
             current_description = line.replace("Issue:", "").strip()
             current_issue = None
-            
+
         elif line.startswith("- File:"):
             if current_description:
                 file_path = line.replace("- File:", "").strip()
@@ -890,17 +894,17 @@ def _parse_codeql_result(codeql_result: str | list[Report], language: str) -> li
                     language=language,
                     cwe="CWE-703"  # Default CWE
                 )
-        
+
         elif line.startswith("Level:") and current_issue:
             level = line.replace("Level:", "").strip().lower()
             level_info = level_to_severity_cwe.get(level, {"severity": SeverityLevel.MEDIUM, "cwe": "CWE-703"})
-            current_issue.severity = level_info["severity"] 
+            current_issue.severity = level_info["severity"]
             current_issue.cwe = level_info["cwe"]
-            
+
         elif line.startswith("- Line:") and current_issue:
             line_num = line.replace("- Line:", "").strip()
             current_issue.line_number = line_num
-            
+
         elif line.startswith("- From line") and current_issue:
             # Extract line range like "From line 10 to line 20"
             import re
@@ -932,7 +936,7 @@ def _convert_trivy_results_to_reports(trivy_result: tuple[str, Any]) -> list[Rep
         return all_reports
 
     vuln_count, trivy_output = trivy_result
-    
+
     if isinstance(trivy_output, str) and "Error" in trivy_output:
         all_reports.append(ErrorReport(
             tool="Trivy",
@@ -954,7 +958,7 @@ def _convert_trivy_results_to_reports(trivy_result: tuple[str, Any]) -> list[Rep
 
     lines = trivy_output.strip().split('\n')
     current_file = ""
-    
+
     for line in lines:
         line = line.strip()
         if not line or line.startswith("Total number of"):
@@ -962,20 +966,20 @@ def _convert_trivy_results_to_reports(trivy_result: tuple[str, Any]) -> list[Rep
 
         # Try to extract structured vulnerability information
         # Trivy format typically includes: Package, Version, Vulnerability ID, Severity, etc.
-        
+
         # Look for vulnerability patterns in the line
         if any(keyword in line.lower() for keyword in ['cve-', 'vulnerability', 'package:', 'severity:']):
             # Enhanced parsing for vulnerability details
             parts = line.split()
             severity = SeverityLevel.MEDIUM  # Default
             cwe = "CWE-1104"  # Use of Unmaintained Third Party Components (default for dependency vulns)
-            
+
             # Extract severity if present
             for severity_key in severity_mapping.keys():
                 if severity_key in line.upper():
                     severity = severity_mapping[severity_key]
                     break
-            
+
             # Extract CVE and map to CWE if possible
             import re
             cve_match = re.search(r'CVE-\d{4}-\d+', line, re.IGNORECASE)
@@ -994,14 +998,14 @@ def _convert_trivy_results_to_reports(trivy_result: tuple[str, Any]) -> list[Rep
                     "memory": "CWE-119",       # Improper Restriction of Operations within Bounds
                     "buffer": "CWE-120",       # Buffer Copy without Checking Size of Input
                 }
-                
+
                 # Try to determine CWE from description
                 line_lower = line.lower()
                 for vuln_type, mapped_cwe in cve_to_cwe.items():
                     if vuln_type in line_lower:
                         cwe = mapped_cwe
                         break
-                
+
                 # Include CVE in description
                 description = f"{cve_id}: {line}"
             else:
@@ -1015,7 +1019,7 @@ def _convert_trivy_results_to_reports(trivy_result: tuple[str, Any]) -> list[Rep
 
             # Try to extract file information from context
             file_path = current_file if current_file else None
-            
+
             all_reports.append(Report(
                 tool="Trivy",
                 severity=severity,
@@ -1023,7 +1027,7 @@ def _convert_trivy_results_to_reports(trivy_result: tuple[str, Any]) -> list[Rep
                 file_path=file_path,
                 cwe=cwe
             ))
-        
+
         # Track current file context
         elif "Target:" in line or line.startswith("File name: ") or line.endswith(('.json', '.txt', '.yml', '.yaml', '.toml', '.lock')):
             current_file = line.replace("Target:", "").strip() if "Target:" in line else line.replace("File name: ", "").strip()
@@ -1059,7 +1063,7 @@ def _parse_scan_results_to_reports(scan_results: dict[str, Any]) -> list[Report]
 
     raw_data = scan_results["raw_results"]
     scan_path = scan_results.get("scan_path", "")
-    
+
     # Map Semgrep severity to SeverityLevel
     severity_mapping = {
         "ERROR": SeverityLevel.HIGH,
@@ -1074,7 +1078,7 @@ def _parse_scan_results_to_reports(scan_results: dict[str, Any]) -> list[Report]
 
         # Extract basic information
         file_path = clean_file_path(result.get("path", ""), scan_path)
-        
+
         # Extract line information
         start_line = result.get("start", {}).get("line", 0)
         end_line = result.get("end", {}).get("line", 0)
@@ -1086,7 +1090,7 @@ def _parse_scan_results_to_reports(scan_results: dict[str, Any]) -> list[Report]
         # Extract metadata
         extra = result.get("extra", {})
         metadata = extra.get("metadata", {})
-        
+
         # Get CWE information
         cwe_list = metadata.get("cwe", [])
         if isinstance(cwe_list, list) and cwe_list:
@@ -1104,11 +1108,11 @@ def _parse_scan_results_to_reports(scan_results: dict[str, Any]) -> list[Report]
         confidence = metadata.get("confidence", "UNKNOWN")
         owasp_tags = metadata.get("owasp", [])
         category = metadata.get("category", "")
-        
+
         # Enhanced description
         message = extra.get("message", result.get("message", "Unknown security issue"))
         description_parts = [message]
-        
+
         if confidence != "UNKNOWN":
             description_parts.append(f"Confidence: {confidence}")
         if category:
@@ -1118,7 +1122,7 @@ def _parse_scan_results_to_reports(scan_results: dict[str, Any]) -> list[Report]
                 description_parts.append(f"OWASP: {', '.join(owasp_tags)}")
             else:
                 description_parts.append(f"OWASP: {owasp_tags}")
-        
+
         enhanced_description = " | ".join(description_parts)
 
         # Determine language from file extension
@@ -1127,7 +1131,7 @@ def _parse_scan_results_to_reports(scan_results: dict[str, Any]) -> list[Report]
             ext = file_path.split('.')[-1].lower()
             lang_mapping = {
                 'py': 'python',
-                'js': 'javascript', 
+                'js': 'javascript',
                 'ts': 'typescript',
                 'java': 'java',
                 'cpp': 'cpp',
@@ -1179,12 +1183,12 @@ def _convert_secrets_to_reports(secrets_result) -> list[Report]:
 
     raw_data = secrets_result["raw_results"]
     scan_path = secrets_result.get("scan_path", "")
-    
+
     # Map secret types to CWE identifiers
     secret_type_to_cwe = {
         "aws": "CWE-798",        # Use of Hard-coded Credentials
         "azure": "CWE-798",
-        "gcp": "CWE-798", 
+        "gcp": "CWE-798",
         "github": "CWE-798",
         "gitlab": "CWE-798",
         "jwt": "CWE-798",
@@ -1214,7 +1218,7 @@ def _convert_secrets_to_reports(secrets_result) -> list[Report]:
 
         # Clean file path
         cleaned_file_path = clean_file_path(file_path, scan_path)
-        
+
         # Extract line information
         start_line = item.get("StartLine", 0)
         end_line = item.get("EndLine", 0)
@@ -1227,7 +1231,7 @@ def _convert_secrets_to_reports(secrets_result) -> list[Report]:
         description = item.get("Description", "Unknown secret type")
         secret_type = item.get("Secret", "unknown")
         match_text = item.get("Match", "")
-        
+
         # Determine CWE based on secret type
         cwe = "CWE-798"  # Default: Use of Hard-coded Credentials
         for secret_keyword, mapped_cwe in secret_type_to_cwe.items():
@@ -1243,7 +1247,7 @@ def _convert_secrets_to_reports(secrets_result) -> list[Report]:
             # Mask most of the secret for security
             masked_match = match_text[:4] + "*" * (len(match_text) - 8) + match_text[-4:] if len(match_text) > 8 else "*" * len(match_text)
             description_parts.append(f"Pattern: {masked_match}")
-        
+
         enhanced_description = " | ".join(description_parts)
 
         # Determine severity based on secret type

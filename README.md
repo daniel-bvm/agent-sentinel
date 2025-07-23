@@ -80,12 +80,6 @@ pip install -e .
 # Get repository directory structure
 git_directory_structure("https://github.com/user/repo", subfolder="src", max_depth=3)
 
-# Read specific files
-git_read_important_files("https://github.com/user/repo", ["README.md", "package.json"])
-
-# List directories at specific depth
-git_list_directories("https://github.com/user/repo", subfolder="src", max_depth=2)
-
 # Checkout a specific branch
 checkout_branch("/path/to/repo", "feature-branch")
 
