@@ -32,6 +32,8 @@ async def get_system_prompt() -> str:
 from src.agent_sentinel import mcp as git_action_mcp, audit_mcp as source_code_mcp, main as security_scanners
 from src.agent_sentinel.utils import merge_reports, Report, ErrorReport, SeverityLevel
 
+class StopAgentLoop(Exception): pass
+
 async def list_toolcalls() -> list[dict[str, Any]]: 
     res = [
         *(await git_action_mcp._mcp_list_tools()),
@@ -44,37 +46,78 @@ fn_mapping = {
     'comprehensive_security_scan': security_scanners.comprehensive_security_scan.fn
 }
 
-async def handoff(tool_name: str, tool_args: dict[str, Any]) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
-    reports = []
+async def get_repo_information(repo_url: str, branch: str | None = None) -> str:
+    # TODO: write this
+    return {
+        "repo_url": repo_url,
+        "branch": branch,
+        "languages": [],
+        "files": [],
+        "directories": [],
+        "submodules": [],
+        "tags": [],
+        "branches": [],
+        "commits": [],
+        "issues": [],
+    }
+    
+
+async def confirm_report(report: Report, tool_name: str, tool_args: dict[str, Any]) -> bool:
+    # TODO: write this
+    return True
+
+async def generate_security_report(confirmed_reports: list[Report], event: asyncio.Event) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
+    # TODO: write this
+    yield wrap_chunk(random_uuid(), merge_reports(confirmed_reports), "assistant")
+
+async def handoff(tool_name: str, tool_args: dict[str, Any], event: asyncio.Event) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     
     if tool_name not in fn_mapping:
         yield wrap_chunk(random_uuid(), f"{tool_name} not found", "assistant")
         return
 
     fn = fn_mapping[tool_name]
+    confirmed_reports = []
 
     async for report in fn(**tool_args):
+        if event.is_set():
+            logger.info(f"[toolcall] Event signal received, stopping...")
+            return
+
         report: Report | ErrorReport
 
         if isinstance(report, ErrorReport):
             logger.warning(f"Error report: {report}")
 
-        else:
+        elif await confirm_report(report):
+            confirmed_reports.append(report)
             yield wrap_chunk(random_uuid(), f"\n<details>\n<summary>{report.severity} - {report.cwe or 'Unknown CWE'} - {report.tool}</summary>\n```plain\n{report}\n```\n</details>\n", "assistant")
             await asyncio.sleep(0.3) # to avoid broken pipe
+            
+    if 'repo_url' in tool_args:
+        info = await get_repo_information(tool_args['repo_url'], tool_args.get('branch', None))
 
-        reports.append(report)
+        if info:
+            info_str = "\n".join([f"{k}: {v}" for k, v in info.items()])
+            yield wrap_chunk(random_uuid(), f"Repository information:\n```plain\n{info_str}\n```\n", "assistant")
 
-    report_str = merge_reports(reports)
-    yield wrap_chunk(random_uuid(), report_str, "assistant")
+    if not confirmed_reports:
+        yield wrap_chunk(random_uuid(), f"Repository is well-secured, no issues found!", "assistant")
+        return
+
+    async for chunk in generate_security_report(confirmed_reports, event):
+        yield chunk
+
+    raise StopAgentLoop()
 
 async def execute_toolcall_request(
     tool_name: str, 
-    tool_args: dict[str, Any]
+    tool_args: dict[str, Any],
+    event: asyncio.Event
 ) -> list[Union[TextContent, EmbeddedResource]] | AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     for tool in await source_code_mcp._mcp_list_tools():
         if tool.name == tool_name:
-            return handoff(tool_name, tool_args) # async generator, no need to await
+            return handoff(tool_name, tool_args, event) # async generator, no need to await
 
     return await execute_openai_compatible_toolcall(tool_name, tool_args, git_action_mcp)
 
@@ -143,7 +186,7 @@ async def handle_request(
             _result = ""
 
             yield wrap_chunk(random_uuid(), f"<action>Running {_name}...</action>", "assistant")
-            result = await execute_toolcall_request(_name, _args)
+            result = await execute_toolcall_request(_name, _args, event)
             
             if isinstance(result, AsyncGenerator):
                 try:
@@ -152,15 +195,16 @@ async def handle_request(
                             raise Exception(chunk.message)
 
                         chunk_content = chunk.choices[0].delta.content or ""
-                        stripped_chunk_content = chunk_content.strip()
-
-                        if stripped_chunk_content.startswith("<details>") and stripped_chunk_content.endswith("</details>"):
-                            yield chunk
+                        yield chunk
 
                         _result += chunk_content
                 except Exception as e:
                     logger.error(f"Error executing toolcall: {e}", exc_info=True)
                     _result = f"Error executing toolcall: {e}"
+                    
+                except StopAgentLoop:
+                    logger.info(f"[toolcall] StopAgentLoop received, stopping the request")
+                    break
 
                 _result = refine_mcp_response(_result, arm)
             else:

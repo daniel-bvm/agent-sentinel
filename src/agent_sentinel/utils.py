@@ -197,6 +197,11 @@ def generate_compact_report(df: pd.DataFrame) -> str:
     compact_report += f'\n\n## CWE note\n{orig_cwe.unique()}'
     return compact_report.strip()
 
+
+def deduplicate_reports(reports: list[Report]) -> list[Report]:
+    # TODO: write this
+    return reports
+
 def merge_reports(reports: list[Report | ErrorReport]) -> str:
     """Merge reports into a single string."""
     valid_reports: list[Report] = [
@@ -212,6 +217,8 @@ def merge_reports(reports: list[Report | ErrorReport]) -> str:
 
     if len(valid_reports) == 0:
         return "No security issues found!"
+
+    valid_reports = deduplicate_reports(valid_reports)
 
     report_list = [{
         "tool": report.tool,
