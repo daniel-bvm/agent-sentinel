@@ -41,10 +41,7 @@ async def list_toolcalls() -> list[dict[str, Any]]:
     return convert_mcp_tools_to_openai_format(res)
 
 fn_mapping = {
-    'comprehensive_security_scan': security_scanners.comprehensive_security_scan.fn,
-    "scan_for_secrets": security_scanners.scan_for_secrets.fn,
-    "scan_dependencies_vulnerabilities": security_scanners.scan_dependencies_vulnerabilities.fn,
-    "scan_code_quality_security": security_scanners.scan_code_quality_security.fn
+    'comprehensive_security_scan': security_scanners.comprehensive_security_scan.fn
 }
 
 async def handoff(tool_name: str, tool_args: dict[str, Any]) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
