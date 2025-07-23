@@ -697,17 +697,6 @@ def scan_secrets_with_gitleaks(scan_path: str) -> dict[str, Any]:
         return {"error": f"Failed to parse Gitleaks output: {str(e)}"}
 
 
-def cwe_priority(item):
-    severity_order = {"ERROR": 0, "WARNING": 2}
-    confidence_order = {"HIGH": 1, "MEDIUM": 3, "LOW": 4}
-    severity = item[1]["severity"]
-    confidence = item[1]["confidence"]
-    return (
-        severity_order.get(severity, 99),
-        confidence_order.get(confidence, 99)
-    )
-
-
 def scan_semgrep(scan_path: str) -> dict[str, Any]:
     """Run Semgrep for multi-language security analysis in a given path (repo or subfolder)."""
     cmd = ["semgrep", "--config=auto", "--json", scan_path]

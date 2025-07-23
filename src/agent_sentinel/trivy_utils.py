@@ -219,10 +219,3 @@ def scan_with_trivy(scan_path: str) -> list[Report]:
             tool="Trivy",
             reason=f"Trivy scan failed: {str(e)}"
         )]
-
-
-# if __name__ == "__main__":
-#     reports = scan_with_trivy("/Users/macbookpro/Projects/eternal-ai")
-#     print(f"Found {len(reports)} Trivy reports:")
-#     for report in reports:
-#         print(f"  {report}")
