@@ -6,6 +6,8 @@ import subprocess
 import os
 from threading import Lock
 
+from .models import Report, SeverityLevel
+
 single_call_lock = Lock()
 
 logging.basicConfig(
@@ -26,6 +28,22 @@ CODEQL_SUPPORTED_LANGUAGES = [
     "swift",
 ]
 
+# Mapping CodeQL severity levels to SeverityLevel enum
+SEVERITY_MAPPING = {
+    "error": SeverityLevel.HIGH,
+    "warning": SeverityLevel.MEDIUM,
+    "note": SeverityLevel.LOW,
+    "recommendation": SeverityLevel.LOW,
+}
+
+# Mapping rule levels to CWE identifiers (common CodeQL patterns)
+RULE_CWE_MAPPING = {
+    "error": "CWE-703",  # Improper Check or Handling of Exceptional Conditions
+    "warning": "CWE-703",
+    "note": "CWE-703",
+    "recommendation": "CWE-703",
+}
+
 
 def _get_rule_level(rule_id: str, run_data: dict, rule_index: int) -> str:
     """Get rule level with the rule ID from the run data."""
@@ -45,8 +63,8 @@ def _get_rule_level(rule_id: str, run_data: dict, rule_index: int) -> str:
 def parse_codeql_results(
     sarif_file_path: str,
     save_to_path: str | None = None,
-) -> str:
-    """Parse CodeQL results to a LLM-ready format."""
+) -> list[Report]:
+    """Parse CodeQL results to a list of Report objects."""
     with open(sarif_file_path) as f:
         data = json_repair.loads(f.read())
     if save_to_path:
@@ -54,62 +72,63 @@ def parse_codeql_results(
             json.dump(data, f, indent=4)
     runs = data["runs"]
     if len(runs) == 0:
-        return "No CodeQL task run found."
+        return []
     run_data = runs[0]
     results = run_data["results"]
     logger.info(f"Total results: {len(results)}")
     if len(results) == 0:
-        return "No CodeQL results found."
-    grouped_results = defaultdict(list)
+        return []
+
+    reports = []
+
     for result in results:
         physical_location = result.get("locations", ["no-file-information"])[0].get("physicalLocation", {})
         file_name = physical_location.get("artifactLocation", {}).get("uri", "no-file-information")
-        line_range = (
-            physical_location.get("region", {}).get("startLine", 0),
-            physical_location.get("region", {}).get("endLine", 0),
-        )
+
+        # Get line information
+        region = physical_location.get("region", {})
+        start_line = region.get("startLine", 0)
+        end_line = region.get("endLine", 0)
+
+        # Format line number
+        if start_line == 0 and end_line == 0:
+            line_number = None
+        elif start_line == end_line:
+            line_number = str(start_line)
+        else:
+            line_number = f"{start_line}-{end_line}"
+
         rule_info = result.get("rule", {})
+        rule_id = result.get("ruleId", rule_info.get("id", "no-rule-information"))
         rule_level = _get_rule_level(
-            rule_id=(
-                result
-                .get("ruleId", rule_info.get("id", "no-rule-information"))
-            ),
+            rule_id=rule_id,
             run_data=run_data,
             rule_index=result.get("ruleIndex", rule_info.get("index", 0)),
         )
-        grouped_results[result["message"]["text"]].append(
-            (
-                file_name,
-                line_range,
-                rule_level,
-            )
+
+        # Map rule level to severity
+        severity = SEVERITY_MAPPING.get(rule_level.lower(), SeverityLevel.MEDIUM)
+
+        # Get CWE mapping
+        cwe = RULE_CWE_MAPPING.get(rule_level.lower(), "CWE-703")
+
+        # Get description
+        description = result["message"]["text"]
+
+        # Create Report object
+        report = Report(
+            tool="CodeQL",
+            severity=severity,
+            description=description,
+            file_path=file_name if file_name != "no-file-information" else None,
+            line_number=line_number,
+            language="code",  # Will be set by caller based on language scanned
+            cwe=cwe
         )
 
-    # Remove duplicates by file and line range
-    new_grouped_results = defaultdict(list)
+        reports.append(report)
 
-    for description, issues in grouped_results.items():
-        issues = list(set(issues))
-        new_grouped_results[description].extend(issues)
-
-    result_str = ""
-    for description, issues in new_grouped_results.items():
-        # result_str += f"File: {filename}\n"
-        result_str += f"Issue: {description}\n"
-        for issue in issues:
-            result_str += f"  - File: {issue[0]}\n"
-            result_str += f"    Level: {issue[2]}\n"
-            # Remove the zero number from line range
-            lines = [line for line in issue[1] if line != 0]
-            if len(lines) == 0:
-                result_str += "No line information found.\n"
-            elif len(lines) == 1:
-                result_str += f"  - Line: {lines[0]}\n"
-            else:
-                result_str += f"  - From line {lines[0]} to line {lines[-1]}\n"
-        result_str += "\n"
-
-    return result_str
+    return reports
 
 
 def download_codeql_pack(language: str) -> None:
@@ -183,42 +202,67 @@ def analyze_codeql_database(
     logger.info(f"CodeQL database for {scan_path} with {language} analyzed successfully.")
     return result_output_path
 
-def run_codeql_scanner(scan_path: str, language: str) -> str:
+def run_codeql_scanner(scan_path: str, language: str) -> list[Report]:
     """Run CodeQL on a given path with a given language."""
+    from .models import ErrorReport
+
     if language not in CODEQL_SUPPORTED_LANGUAGES:
-        return (
-            f"Language {language} is not supported by CodeQL. "
-            "Skipping CodeQL scanner."
-        )
+        return [ErrorReport(
+            tool="CodeQL",
+            reason=f"Language {language} is not supported by CodeQL"
+        )]
+
     logger.info("Running CodeQL scanner...")
     try:
         download_codeql_pack(language)
     except RuntimeError:
         logger.error(f"Failed to download CodeQL pack for {language}.")
-        return f"Failed to download CodeQL pack for {language}."
+        return [ErrorReport(
+            tool="CodeQL",
+            reason=f"Failed to download CodeQL pack for {language}"
+        )]
     try:
         database_path = create_codeql_database(scan_path, language)
     except RuntimeError:
         logger.error(f"Failed to create CodeQL database for {scan_path} with {language}.")
-        return f"Failed to create CodeQL database for {scan_path} with {language}."
+        return [ErrorReport(
+            tool="CodeQL",
+            reason=f"Failed to create CodeQL database for {scan_path} with {language}"
+        )]
     try:
-
         with single_call_lock:
             result_output_path = analyze_codeql_database(scan_path, language, database_path)
-
     except RuntimeError:
         logger.error(f"Failed to analyze CodeQL database for {scan_path} with {language}.")
-        return f"Failed to analyze CodeQL database for {scan_path} with {language}."
-    return parse_codeql_results(sarif_file_path=result_output_path)
+        return [ErrorReport(
+            tool="CodeQL",
+            reason=f"Failed to analyze CodeQL database for {scan_path} with {language}"
+        )]
+
+    reports = parse_codeql_results(sarif_file_path=result_output_path)
+
+    # Set the correct language for all reports
+    for report in reports:
+        report.language = language
+
+    return reports
 
 
 def main():
     logger.info("Starting CodeQL analysis...")
     path = "/Users/macbookpro/Projects/eternal-ai"
+
     language = "python"
-    logger.info("\n" + run_codeql_scanner(path, language))
+    reports = run_codeql_scanner(path, language)
+    logger.info(f"\nPython reports: {len(reports)} found")
+    for report in reports:
+        logger.info(f"  {report}")
+
     language = "javascript"
-    logger.info("\n" + run_codeql_scanner(path, language))
+    reports = run_codeql_scanner(path, language)
+    logger.info(f"\nJavaScript reports: {len(reports)} found")
+    for report in reports:
+        logger.info(f"  {report}")
 
 
 if __name__ == "__main__":

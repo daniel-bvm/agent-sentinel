@@ -827,10 +827,19 @@ def _parse_slither_result(slither_result: dict[str, Any]) -> list[Report]:
     
     return all_reports
 
-def _parse_codeql_result(codeql_result: str, language: str) -> list[Report]:
-    """Parse CodeQL formatted string results and convert to Report objects."""
+def _parse_codeql_result(codeql_result: str | list[Report], language: str) -> list[Report]:
+    """Parse CodeQL results and convert to Report objects."""
     all_reports = []
 
+    # Handle new format - already a list of Report objects
+    if isinstance(codeql_result, list):
+        # Update language for all reports if needed
+        for report in codeql_result:
+            if hasattr(report, 'language') and report.language == "code":
+                report.language = language
+        return codeql_result
+
+    # Handle legacy string format
     if not isinstance(codeql_result, str) or not codeql_result.strip():
         return all_reports
 
@@ -909,7 +918,12 @@ def _parse_codeql_result(codeql_result: str, language: str) -> list[Report]:
 def _convert_trivy_results_to_reports(trivy_result: tuple[str, Any]) -> list[Report]:
     """Parse Trivy tuple results and convert to Report objects."""
     all_reports = []
-    
+
+    # Handle new format - already a list of Report objects
+    if isinstance(trivy_result, list):
+        return trivy_result
+
+    # Handle legacy tuple format
     if not isinstance(trivy_result, tuple) or len(trivy_result) != 2:
         all_reports.append(ErrorReport(
             tool="Trivy",
