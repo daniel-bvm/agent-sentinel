@@ -58,11 +58,14 @@ async def handoff(tool_name: str, tool_args: dict[str, Any]) -> AsyncGenerator[C
 
     async for report in fn(**tool_args):
         report: Report | ErrorReport
-        
+
         if isinstance(report, ErrorReport):
             logger.warning(f"Error report: {report}")
 
-        yield wrap_chunk(random_uuid(), f"\n<details>{report}</details>\n", "assistant")
+        else:
+            yield wrap_chunk(random_uuid(), f"\n<details>\n<summary>{report.severity} - {report.cwe or 'Unknown CWE'} - {report.tool}</summary>\n```plain\n{report}\n```\n</details>\n", "assistant")
+            await asyncio.sleep(0.3) # to avoid broken pipe
+
         reports.append(report)
 
     report_str = merge_reports(reports)
@@ -165,7 +168,7 @@ async def handle_request(
                 _result = refine_mcp_response(_result, arm)
             else:
                 _result = refine_mcp_response(result, arm)
-                yield wrap_chunk(random_uuid(), f'<details>\n```json\n{_result}\n```\n</details>\n', "assistant")
+                yield wrap_chunk(random_uuid(), f'<details><summary>Tool call result</summary>\n```json\n{_result}\n```\n</details>\n', "assistant")
 
             if not isinstance(_result, str):
                 try:
