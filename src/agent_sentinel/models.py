@@ -185,7 +185,7 @@ class Report:
     def line_end(self) -> int | None:
         start = self.line_start
 
-        if not start:
+        if start is None:
             return None
 
         if not isinstance(self.line_number, str):
@@ -193,6 +193,7 @@ class Report:
 
         try:
             e = min(int(self.line_number.split('-')[-1]), start)
+            return e
         except ValueError:
             return start
 
