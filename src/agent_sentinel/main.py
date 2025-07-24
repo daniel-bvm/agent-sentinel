@@ -21,15 +21,6 @@ audit_mcp = FastMCP("Sentinel - Audit Agent", dependencies=["gitpython"])
 
 load_dotenv()
 
-
-@mcp.tool()
-def git_directory_structure(repo_url: str, subfolder: str = "", max_depth: int = None, branch_name: str = None) -> str:
-    """
-    Clone a Git repository and return its directory structure in a tree format
-    """
-    return git_utils.git_directory_structure(repo_url, subfolder, max_depth, branch_name)
-
-
 @mcp.tool()
 def validate_and_set_github_token(token: str | None = None) -> str:
     """
@@ -47,7 +38,7 @@ def provide_guide_for_github_access_token() -> str:
 
 
 @audit_mcp.tool()
-async def comprehensive_security_scan(repo_url: str, subfolder: str = "", branch_name: str = None, deep: bool = True) -> AsyncGenerator[Report | ErrorReport, None]:
+async def security_scan(repo_url: str, subfolder: str = "", branch_name: str = None, deep: bool = True) -> AsyncGenerator[Report | ErrorReport, None]:
     """
     Perform a comprehensive security scan of a GitHub repository and get the report.
     """

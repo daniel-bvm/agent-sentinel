@@ -173,12 +173,13 @@ class Report:
 
     @property
     def line_start(self) -> int | None:
-        if self.line_number is not None:
-            try:
-                return int(self.line_number.split('-')[0])
-            except ValueError:
-                return None
-        return None
+        if not isinstance(self.line_number, str):
+            return None
+
+        try:
+            return int(self.line_number.split('-')[0])
+        except ValueError:
+            return None
 
     @property
     def line_end(self) -> int | None:
@@ -187,14 +188,13 @@ class Report:
         if not start:
             return None
 
-        if self.line_number is None:
-            return None
+        if not isinstance(self.line_number, str):
+            return start
 
         try:
-            return int(self.line_number.split('-')[-1])
+            e = min(int(self.line_number.split('-')[-1]), start)
         except ValueError:
-            return None
-
+            return start
 
 class ErrorReport(Report):
     """
