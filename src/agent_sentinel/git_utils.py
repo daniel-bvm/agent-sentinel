@@ -6,6 +6,9 @@ import shutil
 import hashlib
 import git
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 def clone_repo(repo_url: str, branch_name: str = None) -> str:
     """Clone a repository and return the path. If repository is already cloned in temp directory, reuse it."""
@@ -73,7 +76,7 @@ def clone_repo(repo_url: str, branch_name: str = None) -> str:
         raise Exception(f"Failed to clone repository: {str(e)}")
 
 
-def get_directory_tree(path: str, max_depth: int = 3, current_depth: int = 0, max_items: int = 50) -> str:
+def get_directory_tree(path: str, max_depth: int = 3, current_depth: int = 0, max_items: int = 5) -> str:
     """Compact directory tree, includes files, no indentation, low context size."""
     if max_depth is not None and current_depth >= max_depth:
         return ""
@@ -160,5 +163,28 @@ class RepoInfo:
     def __str__(self) -> str:
         return f"RepoInfo(repo_url={self.repo_url}, branch={self.branch})"
 
-    def get_reference(self, file: str, line_start: str, line_end: str) -> str:
+    def get_reference(self, file: str, line_start: str | int, line_end: str | int) -> str:
         return f"{self.repo_url}/blob/{self.branch}/{file}#L{line_start}-L{line_end}"
+    
+    def reveal_content(self, file: str, line_start: str | int, line_end: str | int, A: int = 0, B: int = 0) -> str | None:
+        if isinstance(line_start, str) and line_start.isdigit():
+            line_start = int(line_start)
+
+        if isinstance(line_end, str) and line_end.isdigit():
+            line_end = int(line_end)
+
+        if not isinstance(line_start, int) or not isinstance(line_end, int):
+            logger.warning(f"Invalid line number: {line_start} or {line_end}")
+            return None
+
+        line_start -= A
+        line_end += B
+
+        if not os.path.exists(os.path.join(self.repo_path, file)):
+            logger.warning(f"File {file} does not exist in the repository")
+            return None
+
+        with open(os.path.join(self.repo_path, file), 'r') as f:
+            lines = f.readlines()
+
+        return '\n'.join(f'{i + 1}> {content}' for i, content in enumerate(lines[line_start:line_end]))

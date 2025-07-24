@@ -151,7 +151,7 @@ def get_db() -> List[CWEWeakness]:
 
 def get_cwe_by_id(cwe_id: str | int) -> CWEWeakness | None:
     if isinstance(cwe_id, str):
-        pat = re.compile(r"CWE-\d+", re.IGNORECASE)
+        pat = re.compile(r"CWE-(\d+)", re.IGNORECASE)
         cwe_ids = pat.findall(cwe_id)
 
         if len(cwe_ids) == 0:
@@ -161,7 +161,6 @@ def get_cwe_by_id(cwe_id: str | int) -> CWEWeakness | None:
             logger.warning(f"Multiple CWE IDs found in the CWE ID: {cwe_id}")
 
         cwe_id = cwe_ids[0]
-        cwe_id = str(cwe_id)
 
     else:
         cwe_id = str(cwe_id)

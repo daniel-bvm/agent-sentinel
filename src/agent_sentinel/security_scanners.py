@@ -853,8 +853,7 @@ def _convert_secrets_to_reports(secrets_result) -> list[Report]:
 
         # Extract secret information
         description = item.get("Description", "Unknown secret type")
-        secret_type = item.get("Secret", "unknown")
-        match_text = item.get("Match", "")
+        secret_type = item.get("Secret", None) or None
 
         # Determine CWE based on secret type
         cwe = "CWE-798"  # Default: Use of Hard-coded Credentials
@@ -865,14 +864,10 @@ def _convert_secrets_to_reports(secrets_result) -> list[Report]:
 
         # Enhanced description with context
         description_parts = [description]
-        if secret_type and secret_type != "unknown":
-            description_parts.append(f"Type: {secret_type}")
-        if match_text and len(match_text) > 10:  # Only include if meaningful
-            # Mask most of the secret for security
-            masked_match = match_text[:4] + "*" * (len(match_text) - 8) + match_text[-4:] if len(match_text) > 8 else "*" * len(match_text)
-            description_parts.append(f"Pattern: {masked_match}")
+        if secret_type is not None:
+            description_parts.append(f"Value: {secret_type}")
 
-        enhanced_description = " | ".join(description_parts)
+        enhanced_description = ", ".join(description_parts)
 
         # Determine severity based on secret type
         high_severity_types = ["aws", "azure", "gcp", "github", "gitlab", "private", "rsa", "ssh"]

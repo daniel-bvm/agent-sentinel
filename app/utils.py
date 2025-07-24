@@ -7,7 +7,7 @@ import re
 import datetime
 import json
 import time
-from app.oai_models import ChatCompletionStreamResponse, ChatCompletionMessageParam, ErrorResponse, random_uuid
+from app.oai_models import ChatCompletionStreamResponse, ChatCompletionMessageParam, ErrorResponse, random_uuid, ChatCompletionContentPartParam
 import regex
 import asyncio
 from functools import wraps
@@ -426,6 +426,26 @@ def get_newest_message(messages: list[ChatCompletionMessageParam]) -> str:
 
     else:
         raise ValueError(f"Invalid message content: {messages[-1].get('content')}")
+    
+
+def get_user_messages(messages: list[ChatCompletionMessageParam] | list[dict[str, Any]], last_n: int = 3) -> list[str]:
+    user_messages: list[Union[str, list[ChatCompletionContentPartParam]]] = []
+
+    for message in messages:
+        if isinstance(message, dict) and message.get("role") == "user":
+            user_messages.append(message.get("content", ""))
+        elif message.get("role") == "user":
+            user_messages.append(message.content)
+
+    return [
+        (
+            e if isinstance(e, str) else '\n'.join(
+                item.get('text', '') for item in e 
+                if item.get('type') == 'text'
+            )
+        ) 
+        for e in user_messages[-last_n:]
+    ]
 
 
 async def wrap_toolcall_request(uuid: str, fn_name: str, args: dict[str, Any]) -> ChatCompletionStreamResponse:
