@@ -166,6 +166,30 @@ class Report:
             "cwe": self.cwe,
             "cve": self.cve
         }
+        
+    @property
+    def line_start(self) -> int | None:
+        if self.line_number is not None:
+            try:
+                return int(self.line_number.split('-')[0])
+            except ValueError:
+                return None
+        return None
+    
+    @property
+    def line_end(self) -> int | None:
+        start = self.line_start
+
+        if not start:
+            return None
+
+        if self.line_number is None:
+            return None
+
+        try:
+            return int(self.line_number.split('-')[-1])
+        except ValueError:
+            return None
 
 
 class ErrorReport(Report):

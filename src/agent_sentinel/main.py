@@ -47,9 +47,9 @@ def provide_guide_for_github_access_token() -> str:
 
 
 @audit_mcp.tool()
-async def comprehensive_security_scan(repo_url: str, subfolder: str = "", branch_name: str = None) -> AsyncGenerator[Report | ErrorReport, None]:
+async def comprehensive_security_scan(repo_url: str, subfolder: str = "", branch_name: str = None, deep: bool = True) -> AsyncGenerator[Report | ErrorReport, None]:
     """
     Perform a comprehensive security scan of a GitHub repository and get the report.
     """
-    async for report in security_scanners.comprehensive_security_scan_concurrent(repo_url, subfolder, branch_name):
+    async for report in security_scanners.comprehensive_security_scan_concurrent(repo_url, subfolder, branch_name, deep):
         yield report

@@ -46,6 +46,9 @@ fn_mapping = {
     'comprehensive_security_scan': security_scanners.comprehensive_security_scan.fn
 }
 
+def fmt_report(report: Report) -> str:
+    f"[{report.severity}] {report.tool} found issue in {report.file_path}:{report.line_number} - {report.description} (CWE: {report.cwe or 'N/A'}, CVE: {report.cve or 'N/A'}, Lang: {report.language})"
+
 async def get_repo_information(repo_url: str, branch: str | None = None) -> str:
     # TODO: write this
     return {
@@ -78,6 +81,7 @@ async def handoff(tool_name: str, tool_args: dict[str, Any], event: asyncio.Even
 
     fn = fn_mapping[tool_name]
     confirmed_reports = []
+    deep_mode = tool_args.get('deep', True)
 
     async for report in fn(**tool_args):
         if event.is_set():
@@ -89,11 +93,11 @@ async def handoff(tool_name: str, tool_args: dict[str, Any], event: asyncio.Even
         if isinstance(report, ErrorReport):
             logger.warning(f"Error report: {report}")
 
-        elif await confirm_report(report):
+        elif not deep_mode or await confirm_report(report):
             confirmed_reports.append(report)
             yield wrap_chunk(random_uuid(), f"\n<details>\n<summary>{report.severity} - {report.cwe or 'Unknown CWE'} - {report.tool}</summary>\n```plain\n{report}\n```\n</details>\n", "assistant")
             await asyncio.sleep(0.3) # to avoid broken pipe
-            
+
     if 'repo_url' in tool_args:
         info = await get_repo_information(tool_args['repo_url'], tool_args.get('branch', None))
 

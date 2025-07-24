@@ -158,7 +158,7 @@ def _convert_npm_audit_to_reports(npm_result: dict[str, Any]) -> list[Report]:
         ))
     return reports
 
-async def comprehensive_security_scan_concurrent(repo_url: str, subfolder: str = "", branch_name: str = None) -> AsyncGenerator[Report | ErrorReport, None]:
+async def comprehensive_security_scan_concurrent(repo_url: str, subfolder: str = "", branch_name: str = None, deep: bool = True) -> AsyncGenerator[Report | ErrorReport, None]:
     """
     Perform a comprehensive security scan of a GitHub repository concurrently.
 

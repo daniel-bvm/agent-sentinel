@@ -5,7 +5,7 @@ import tempfile
 import shutil
 import hashlib
 import git
-
+import re
 
 def clone_repo(repo_url: str, branch_name: str = None) -> str:
     """Clone a repository and return the path. If repository is already cloned in temp directory, reuse it."""
@@ -23,7 +23,7 @@ def clone_repo(repo_url: str, branch_name: str = None) -> str:
     os.environ["GIT_TERMINAL_PROMPT"] = "0"
 
     repo_hash = hashlib.sha256(repo_url.encode()).hexdigest()[:12]
-    temp_dir = os.path.join(tempfile.gettempdir(), f"github_tools_{repo_hash}")
+    temp_dir = os.path.join(tempfile.gettempdir(), f"sentinel_{repo_hash}")
 
     # If directory exists and is a valid git repo, return it
     if os.path.exists(temp_dir):
@@ -146,3 +146,19 @@ def git_directory_structure(repo_url: str, subfolder: str = "", max_depth: int =
 
     except Exception as e:
         return f"Error: {str(e)}"
+
+class RepoInfo:
+    DEFAULT_REMOTE_NAME = 'origin'
+
+    def __init__(self, repo_path: str):
+        self.repo_path = repo_path
+        self.repo = git.Repo(repo_path)
+        self.branch = re.sub(rf'^(remotes/)?{self.DEFAULT_REMOTE_NAME}/', '', self.repo.active_branch.name)
+        self.repo_url = re.sub(r'\.git$', '', self.repo.remote(self.DEFAULT_REMOTE_NAME).url).strip("/")
+    
+
+    def __str__(self) -> str:
+        return f"RepoInfo(repo_url={self.repo_url}, branch={self.branch})"
+
+    def get_reference(self, file: str, line_start: str, line_end: str) -> str:
+        return f"{self.repo_url}/blob/{self.branch}/{file}#L{line_start}-L{line_end}"

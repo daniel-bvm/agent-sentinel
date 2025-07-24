@@ -78,8 +78,9 @@ def parse_cwe_weaknesses(xml_path: str) -> List[CWEWeakness]:
 
 DEFINITION_LINK_FMT = "https://cwe.mitre.org/data/definitions/{cwe_id}.html"
 DB_URL = "https://cwe.mitre.org/data/xml/cwec_latest.xml.zip"
-DB_LOCAL_PATH = "/storage/cwec_latest.xml.zip"
+DB_LOCAL_PATH = "./storage/cwec_latest.xml.zip"
 
+os.makedirs("./storage", exist_ok=True)
 
 from functools import lru_cache
 import zipfile
@@ -147,10 +148,10 @@ def get_db() -> List[CWEWeakness]:
 
         xml_file = xml_files[0]
         return parse_cwe_weaknesses(xml_file)
-    
+
 def get_cwe_by_id(cwe_id: str | int) -> CWEWeakness | None:
     if isinstance(cwe_id, str):
-        pat = re.compile(r"\d+")
+        pat = re.compile(r"CWE-\d+", re.IGNORECASE)
         cwe_ids = pat.findall(cwe_id)
 
         if len(cwe_ids) == 0:
@@ -160,6 +161,7 @@ def get_cwe_by_id(cwe_id: str | int) -> CWEWeakness | None:
             logger.warning(f"Multiple CWE IDs found in the CWE ID: {cwe_id}")
 
         cwe_id = cwe_ids[0]
+        cwe_id = str(cwe_id)
 
     else:
         cwe_id = str(cwe_id)
