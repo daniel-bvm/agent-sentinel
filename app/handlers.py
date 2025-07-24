@@ -3,7 +3,7 @@ from app.oai_models import (ChatCompletionRequest,
                             ChatCompletionAdditionalParameters,
                             ErrorResponse,
                             random_uuid,
-                            ChatCompletionMessageParam)
+                            ChatCompletionMessageParam, OpenAIBaseModel)
 from typing import AsyncGenerator, Optional, Any, Callable, Union
 import asyncio
 from app.oai_streaming import create_streaming_response, ChatCompletionResponseBuilder
@@ -79,7 +79,7 @@ from src.agent_sentinel import mcp as git_action_mcp, audit_mcp as source_code_m
 from src.agent_sentinel.utils import merge_reports, Report, ErrorReport, SeverityLevel
 from src.agent_sentinel.git_utils import RepoInfo, clone_repo, get_directory_tree 
 
-class StopAgentLoop(Exception): pass
+class FullyHandoff(OpenAIBaseModel): pass
 
 async def list_toolcalls() -> list[dict[str, Any]]: 
     res = [
@@ -314,11 +314,168 @@ async def confirm_report(report: Report, confirmed_reports: list[Report], deep_m
 
     return report
 
-async def generate_security_report(confirmed_reports: list[Report], event: asyncio.Event) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
+from pandas import DataFrame
+import pandas as pd
+
+REPORT_WRITTING_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "include_table",
+            "description": "Respond a table in markdown format to the user. Return a label to reference to.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "df_id": {
+                        "type": "string",
+                        "description": "The id of the dataframe to include in the report",
+                        "enum": [
+                            "high_severity_df",
+                            "medium_severity_df",
+                            "other_df"
+                        ]
+                    },
+                    "columns": {
+                        "type": "array",
+                        "description": "Columns in the dataframe to include in the report",
+                        "items": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "required": ["df_id", "columns"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "include_chart",
+            "description": "Respond a chart in markdown format to the user. Return a label to reference to.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "df_id": {
+                        "type": "string",
+                        "description": "The id of the dataframe to include in the report",
+                        "enum": [
+                            "high_severity_df",
+                            "medium_severity_df",
+                            "other_df"
+                        ]
+                    },
+                    "chart_type": {
+                        "type": "string",
+                        "description": "The type of the chart to include in the report",
+                        "enum": [
+                            "bar",
+                            "line",
+                            "pie"
+                        ]
+                    },
+                    "x_axis": {
+                        "type": "string",
+                        "description": "The column to use as the x-axis of the chart"
+                    },
+                    "y_axis": {
+                        "type": "string",
+                        "description": "The column to use as the y-axis of the chart"
+                    }
+                },
+                "required": ["df_id", "chart_type", "x_axis", "y_axis"]
+            }
+        }
+    }
+]
+
+def generate_table_markdown(df: DataFrame, columns: list[str]) -> str:
+    if not columns:
+        return df.to_markdown()
+
+    return df[columns].to_markdown()
+
+def generate_chart_markdown(df: DataFrame, chart_type: str, x_axis: str, y_axis: str) -> str:
+    try:
+        return df.plot(kind=chart_type, x=x_axis, y=y_axis).to_html()
+    except Exception as e:
+        logger.error(f"Error generating chart: {e}", exc_info=True)
+        return ""
+
+async def generate_headline(df: DataFrame, event: asyncio.Event) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
+    yield wrap_chunk(random_uuid(), "report", "assistant")
+
+async def generate_high_severity_report(
+    df: DataFrame,
+    event: asyncio.Event
+) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     # TODO: write this
+    yield wrap_chunk(random_uuid(), "report", "assistant")
+
+async def generate_medium_severity_report(
+    df: DataFrame,
+    event: asyncio.Event
+) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
+    # TODO: write this
+    yield wrap_chunk(random_uuid(), "report", "assistant")
+    
+async def generate_other_severity_report(
+    df: DataFrame,
+    event: asyncio.Event
+) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
+    # TODO: write this
+    yield wrap_chunk(random_uuid(), "report", "assistant")
+
+def normalize_cwe(cwe: str) -> str:
+    return cwe.split(':')[0].strip().upper()
+
+async def generate_security_deep_report(
+    confirmed_reports: list[Report], 
+    event: asyncio.Event
+) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
+    report_list = [
+        {
+            "tool": report.tool,
+            "severity": report.severity,
+            "description": report.description,
+            "file_path": report.file_path,
+            "line_number": report.line_number,
+            "language": report.language,
+            "cwe": report.cwe,
+            "cve": report.cve
+        } 
+        for report in confirmed_reports
+    ]
+
+    df = pd.DataFrame(report_list)
+    df['cwe'] = df['cwe'].apply(normalize_cwe)
+
+    high_severity_df = df[df['severity'] == 'HIGH']
+    medium_severity_df = df[df['severity'] == 'MEDIUM']
+    other_df = df[df['severity'] != 'HIGH' and df['severity'] != 'MEDIUM']
+    
+    async for chunk in generate_headline(df, event):
+        yield chunk
+
+    async for chunk in generate_high_severity_report(high_severity_df, event):
+        yield chunk
+
+    async for chunk in generate_medium_severity_report(medium_severity_df, event):
+        yield chunk
+        
+    async for chunk in generate_other_severity_report(other_df, event):
+        yield chunk
+
+async def generate_security_report(
+    confirmed_reports: list[Report], 
+    event: asyncio.Event
+) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     yield wrap_chunk(random_uuid(), merge_reports(confirmed_reports), "assistant")
 
-async def handoff(tool_name: str, tool_args: dict[str, Any], event: asyncio.Event) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
+async def handoff(
+    tool_name: str, 
+    tool_args: dict[str, Any], 
+    event: asyncio.Event
+) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse | FullyHandoff, None]:
     
     if tool_name not in fn_mapping:
         yield wrap_chunk(random_uuid(), f"{tool_name} not found", "assistant")
@@ -363,16 +520,19 @@ async def handoff(tool_name: str, tool_args: dict[str, Any], event: asyncio.Even
                 "assistant"
             )
 
-            await asyncio.sleep(0.3) # to avoid broken pipe
-
     if not confirmed_reports:
         yield wrap_chunk(random_uuid(), f"Repository is well-secured, no issues found!", "assistant")
         return
 
-    async for chunk in generate_security_report(confirmed_reports, event):
-        yield chunk
+    if deep_mode:
+        yield FullyHandoff()
 
-    raise StopAgentLoop()
+        async for chunk in generate_security_deep_report(confirmed_reports, event):
+            yield chunk
+
+    else:
+        async for chunk in generate_security_report(confirmed_reports, event):
+            yield chunk
 
 async def execute_toolcall_request(
     tool_name: str, 
@@ -456,21 +616,29 @@ async def handle_request(
             
             if isinstance(result, AsyncGenerator):
                 try:
+                    fully_handoff = False
+
                     async for chunk in result:
                         if isinstance(chunk, ErrorResponse):
                             raise Exception(chunk.message)
 
                         chunk_content = chunk.choices[0].delta.content or ""
-                        yield chunk
+                        striped_chunk_content = chunk_content.strip()
+
+                        if fully_handoff or (
+                            striped_chunk_content.startswith('<details>') 
+                            and striped_chunk_content.endswith('</details>')
+                        ):
+                            yield chunk
 
                         _result += chunk_content
+
+                    if fully_handoff:
+                        return
+
                 except Exception as e:
                     logger.error(f"Error executing toolcall: {e}", exc_info=True)
                     _result = f"Error executing toolcall: {e}"
-                    
-                except StopAgentLoop:
-                    logger.info(f"[toolcall] StopAgentLoop received, stopping the request")
-                    break
 
                 _result = refine_mcp_response(_result, arm)
             else:
