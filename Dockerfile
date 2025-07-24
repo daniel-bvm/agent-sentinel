@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.10-slim
 
 # --- Install dependencies ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -41,7 +41,15 @@ RUN curl -L https://foundry.paradigm.xyz | bash && \
 ENV PATH="/root/.foundry/bin:$PATH"
 
 # --- Install Slither ---
+# Install dependencies required for mythril (including distutils)
+RUN apt-get update && apt-get install -y python3-distutils && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install slither and requests first
 RUN pip install slither-analyzer requests
+
+# Install mythril with pinned compatible version
+RUN pip install mythril
 
 # --- Install CodeQL CLI ---
 ENV CODEQL_VERSION="2.22.1"

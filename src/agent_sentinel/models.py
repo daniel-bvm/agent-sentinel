@@ -1,4 +1,4 @@
-from enum import StrEnum
+from enum import Enum
 from typing import Any
 
 cwe_mapping = {
@@ -74,7 +74,7 @@ cwe_mapping = {
     "B703": "CWE-78",  # django_mark_safe
 }
 
-class SeverityLevel(StrEnum):
+class SeverityLevel(Enum):
     """
     Enumeration of security finding severity levels.
     """
@@ -85,6 +85,10 @@ class SeverityLevel(StrEnum):
     WARNING = "WARNING"
     ERROR = "ERROR"
     UNKNOWN = "UNKNOWN"
+
+    def __str__(self) -> str:
+        """Return the string value of the enum."""
+        return self.value
 
 
 class Report:
@@ -116,7 +120,7 @@ class Report:
             cwe: Common Weakness Enumeration identifier (default: "n/a")
         """
         self.tool = tool
-        
+
         # Handle both string and SeverityLevel inputs
         if isinstance(severity, SeverityLevel):
             self.severity = severity
@@ -166,7 +170,7 @@ class Report:
             "cwe": self.cwe,
             "cve": self.cve
         }
-        
+
     @property
     def line_start(self) -> int | None:
         if self.line_number is not None:
@@ -175,7 +179,7 @@ class Report:
             except ValueError:
                 return None
         return None
-    
+
     @property
     def line_end(self) -> int | None:
         start = self.line_start
