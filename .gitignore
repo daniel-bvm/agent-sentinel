@@ -206,3 +206,4 @@ src/tests/
 .scannerwork/
 mydb/
 security_scan_results.txt
+flattened/

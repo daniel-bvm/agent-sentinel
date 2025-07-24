@@ -7,7 +7,9 @@ import json
 import logging
 import re
 import asyncio
-from enum import StrEnum
+import hashlib
+import shutil
+from pathlib import Path
 
 from typing import Any, AsyncGenerator, Awaitable
 from .utils import run_command, detect_project_languages, patch_foundry_config, sync2async
@@ -23,6 +25,7 @@ logger = logging.getLogger(__name__)
 # Mapping of tool identities to their post-processing functions
 TOOL_POST_PROCESSORS = {
     "slither": lambda result: _parse_slither_result(result),
+    "mythril": lambda result: _parse_mythril_result(result),
     "secrets": lambda result: _convert_secrets_to_reports(result),
     "semgrep": lambda result: _parse_scan_results_to_reports(result),
     "trivy": lambda result: _convert_trivy_results_to_reports(result),
@@ -182,7 +185,18 @@ async def comprehensive_security_scan_concurrent(repo_url: str, subfolder: str =
 
     # Run Solidity-specific scans
     if "solidity" in languages:
-        tasks.append(a_stupid_wrapper("slither", sync2async(scan_solidity_slither)(scan_path)))
+        if deep:
+            # Try Mythril for deep analysis when deep=True, fallback to Slither if not available
+            # Check if Mythril is available first
+            mythril_check = await sync2async(run_command)(["which", "myth"])
+            if mythril_check["success"]:
+                tasks.append(a_stupid_wrapper("mythril", sync2async(scan_solidity_mythril)(scan_path)))
+            else:
+                logger.warning("Mythril not available for deep analysis, falling back to Slither")
+                tasks.append(a_stupid_wrapper("slither", sync2async(scan_solidity_slither)(scan_path)))
+        else:
+            # Use Slither for faster analysis when deep=False
+            tasks.append(a_stupid_wrapper("slither", sync2async(scan_solidity_slither)(scan_path)))
 
     # Schedule general security scans
     tasks.append(a_stupid_wrapper("secrets", sync2async(scan_secrets_with_gitleaks)(scan_path)))
@@ -452,6 +466,308 @@ def _parse_slither_result(slither_result: dict[str, Any]) -> list[Report]:
                 language="solidity",
                 cwe="CWE-1100"  # Insufficient Isolation or Compartmentalization
             ))
+
+    return all_reports
+
+def scan_solidity_mythril(scan_path: str) -> dict[str, Any]:
+    """
+    Run Mythril security analysis on Solidity contracts using enhanced flattening approach.
+
+    Mythril is a security analysis tool for Ethereum smart contracts that detects a range of
+    security issues including integer underflows, owner-overwrite-to-Ether-withdrawal, and others.
+
+    Documentation: https://mythril-classic.readthedocs.io/_/downloads/en/master/pdf/
+    """
+    # 1. Check if Mythril is available
+    mythril_check = run_command(["which", "myth"])
+    if not mythril_check["success"]:
+        return {"error": "Mythril is not installed or not available in PATH. Install with: pip install mythril"}
+
+    # 2. Check if Solidity files exist
+    scan_path_obj = Path(scan_path)
+    sol_files = list(scan_path_obj.rglob("*.sol"))
+
+    if not sol_files:
+        return {"error": "No Solidity (.sol) files found"}
+
+    logger.info(f"🧾 Found {len(sol_files)} Solidity files to analyze with Mythril.")
+
+    # 3. Create temporary flattened directory
+    flattened_dir = scan_path_obj / ".tmp_mythril_flattened"
+    flattened_dir.mkdir(exist_ok=True)
+
+    try:
+        all_results = []
+        solc_version = "0.8.30"  # Default Solidity version
+
+        for sol_file in sol_files:
+            parent_dir = sol_file.parent
+            parent_hash = hashlib.md5(str(parent_dir).encode()).hexdigest()[:8]
+
+            flat_filename = f"{sol_file.stem}_{parent_hash}.flat.sol"
+            flat_path = flattened_dir / flat_filename
+
+            logger.info(f"🔃 Flattening: {sol_file}")
+            try:
+                # Flatten the contract using forge flatten
+                with open(flat_path, "w") as f:
+                    flatten_result = run_command(["forge", "flatten", str(sol_file)], cwd=scan_path)
+                    if not flatten_result["success"]:
+                        logger.warning(f"❌ Failed to flatten {sol_file}: {flatten_result['stderr']}")
+                        all_results.append({
+                            "success": False,
+                            "error": f"Failed to flatten: {flatten_result['stderr']}",
+                            "issues": [],
+                            "source_path": str(sol_file.relative_to(scan_path_obj))
+                        })
+                        continue
+
+                    f.write(flatten_result["stdout"])
+
+            except Exception as e:
+                logger.warning(f"❌ Failed to flatten {sol_file}: {str(e)}")
+                all_results.append({
+                    "success": False,
+                    "error": f"Failed to flatten: {str(e)}",
+                    "issues": [],
+                    "source_path": str(sol_file.relative_to(scan_path_obj))
+                })
+                continue
+
+            logger.info(f"🔍 Analyzing with Mythril: {flat_path}")
+            try:
+                # Run Mythril on the flattened file
+                mythril_result = run_command([
+                    "myth", "analyze", str(flat_path),
+                    "--solv", solc_version,
+                    "--execution-timeout", "60",
+                    "-o", "json"
+                ])
+
+                if mythril_result["success"]:
+                    try:
+                        myth_json = json.loads(mythril_result["stdout"])
+                        myth_json["source_path"] = str(sol_file.relative_to(scan_path_obj))
+                        all_results.append(myth_json)
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"⚠️ Failed to parse Mythril JSON output for {flat_path}: {str(e)}")
+                        all_results.append({
+                            "success": False,
+                            "error": f"Failed to parse Mythril JSON: {str(e)}",
+                            "issues": [],
+                            "source_path": str(sol_file.relative_to(scan_path_obj))
+                        })
+                else:
+                    logger.warning(f"⚠️ Mythril analysis failed on: {flat_path}")
+                    all_results.append({
+                        "success": False,
+                        "error": mythril_result["stderr"] or "Mythril analysis failed",
+                        "issues": [],
+                        "source_path": str(sol_file.relative_to(scan_path_obj))
+                    })
+
+            except Exception as e:
+                logger.warning(f"⚠️ Mythril analysis exception on {flat_path}: {str(e)}")
+                all_results.append({
+                    "success": False,
+                    "error": f"Mythril analysis exception: {str(e)}",
+                    "issues": [],
+                    "source_path": str(sol_file.relative_to(scan_path_obj))
+                })
+
+        # Return the results in the expected format
+        return {
+            "raw_results": all_results,
+            "scan_path": scan_path
+        }
+
+    finally:
+        # 4. Clean up the flattened directory
+        try:
+            if flattened_dir.exists():
+                shutil.rmtree(flattened_dir)
+                logger.info(f"🧹 Cleaned up flattened directory: {flattened_dir}")
+        except Exception as e:
+            logger.warning(f"Failed to clean up flattened directory {flattened_dir}: {str(e)}")
+
+
+def _parse_mythril_result(mythril_result: dict[str, Any]) -> list[Report]:
+    """
+    Parse raw Mythril JSON results and convert to Report objects.
+
+    Mythril documentation: https://mythril-classic.readthedocs.io/_/downloads/en/master/pdf/
+
+    Expected issue schema:
+    {
+        "address": 731,
+        "code": "assert(i == 0)",
+        "contract": "Exceptions",
+        "description": "detailed description",
+        "filename": "solidity_examples/exceptions.sol",
+        "function": "assert1()",
+        "lineno": 7,
+        "max_gas_used": 492,
+        "min_gas_used": 207,
+        "severity": "Medium",
+        "sourceMap": ":::i",
+        "swc-id": "110",
+        "title": "Exception State",
+        "tx_sequence": {...}
+    }
+    """
+    all_reports = []
+
+    if "error" in mythril_result:
+        logger.error(f"Mythril parsing error: {mythril_result['error']}")
+        all_reports.append(ErrorReport(
+            tool="Mythril",
+            reason=mythril_result["error"]
+        ))
+        return all_reports
+
+    if "raw_results" not in mythril_result:
+        logger.error("No raw results found in Mythril output")
+        all_reports.append(ErrorReport(
+            tool="Mythril",
+            reason="No raw results found in Mythril output"
+        ))
+        return all_reports
+
+    raw_data = mythril_result["raw_results"]
+    scan_path = mythril_result.get("scan_path", "")
+
+    logger.info(f"Parsing Mythril results from scan path: {scan_path}")
+    logger.info(f"Processing {len(raw_data)} Mythril result files")
+
+    # Map Mythril severity to SeverityLevel
+    severity_mapping = {
+        "High": SeverityLevel.HIGH,
+        "Medium": SeverityLevel.MEDIUM,
+        "Low": SeverityLevel.LOW,
+    }
+
+    # Map SWC to CWE (SWC is Smart Contract Weakness Classification)
+    swc_to_cwe = {
+        "SWC-101": "CWE-862",  # Integer Overflow -> Improper Authorization
+        "SWC-103": "CWE-1284", # Floating Pragma -> Improper Validation
+        "SWC-104": "CWE-252",  # Unchecked Call Return Value -> Unchecked Return Value
+        "SWC-105": "CWE-670",  # Unprotected Ether Withdrawal -> Always-Incorrect Control Flow
+        "SWC-106": "CWE-691",  # Unprotected SELFDESTRUCT -> Insufficient Control Flow Management
+        "SWC-107": "CWE-664",  # Reentrancy -> Improper Control of a Resource
+        "SWC-108": "CWE-440",  # State Variable Default Visibility -> Direct Request
+        "SWC-109": "CWE-665",  # Uninitialized Storage Pointer -> Improper Initialization
+        "SWC-110": "CWE-617",  # Assert Violation -> Reachable Assertion
+        "SWC-111": "CWE-834",  # Use of Deprecated Solidity Functions -> Excessive Iteration
+        "SWC-112": "CWE-477",  # Delegatecall to Untrusted Callee -> Use of Obsolete Function
+        "SWC-113": "CWE-362",  # DoS with Failed Call -> Concurrent Execution
+        "SWC-114": "CWE-829",  # Transaction Order Dependence -> Inclusion of Functionality from Untrusted Source
+        "SWC-115": "CWE-707",  # Authorization through tx.origin -> Improper Neutralization
+        "SWC-116": "CWE-672",  # Block values as a proxy for time -> Operation on a Resource after Expiration
+        "SWC-118": "CWE-190",  # Incorrect Constructor Name -> Integer Overflow
+        "SWC-119": "CWE-703",  # Shadowing State Variables -> Improper Check or Handling of Exceptional Conditions
+        "SWC-120": "CWE-667",  # Weak Sources of Randomness -> Improper Locking
+        "SWC-123": "CWE-20",   # Requirement Violation -> Improper Input Validation
+        "SWC-124": "CWE-681",  # Write to Arbitrary Storage Location -> Incorrect Conversion between Numeric Types
+        "SWC-125": "CWE-561",  # Incorrect Inheritance Order -> Dead Code
+        "SWC-127": "CWE-705",  # Arbitrary Jump with Function Type Variable -> Incorrect Control Flow Scoping
+        "SWC-128": "CWE-710",  # DoS With Block Gas Limit -> Improper Adherence to Coding Standards
+        "110": "CWE-617",      # Assert Violation -> Reachable Assertion (fallback for numeric IDs)
+    }
+
+    # Process each file result
+    for file_result in raw_data:
+        if not isinstance(file_result, dict):
+            continue
+
+        source_path = file_result.get("source_path", "unknown")
+
+        # Handle failed analysis
+        if not file_result.get("success", True) or file_result.get("error"):
+            error_msg = file_result.get("error", "Unknown Mythril error")
+            logger.warning(f"Mythril analysis failed for {source_path}: {error_msg}")
+            all_reports.append(ErrorReport(
+                tool="Mythril",
+                reason=f"Analysis failed for {source_path}: {error_msg}"
+            ))
+            continue
+
+        # Process issues for this file
+        issues = file_result.get("issues", [])
+        logger.info(f"Processing {len(issues)} issues from {source_path}")
+
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+
+                        # Extract basic information from Mythril issue (new schema)
+            title = issue.get("title", "Unknown vulnerability")
+            description = issue.get("description", "No description available")
+            severity = issue.get("severity", "Medium")
+            swc_id = issue.get("swc-id", "")
+
+            # Extract file and line information (new schema)
+            filename = issue.get("filename", source_path)
+            line_number = None
+
+            # Handle different line number formats
+            if "lineno" in issue:
+                line_number = str(issue["lineno"])
+            elif "line" in issue:
+                line_number = str(issue["line"])
+
+            # Clean file path relative to scan path
+            if filename:
+                file_path = clean_file_path(filename, scan_path)
+                if file_path == filename:  # If cleaning didn't change it, use source_path
+                    file_path = source_path
+            else:
+                file_path = source_path
+
+            # Map SWC to CWE
+            cwe = swc_to_cwe.get(swc_id, "CWE-664")  # Default CWE
+
+            # Map severity
+            severity_level = severity_mapping.get(severity, SeverityLevel.MEDIUM)
+
+            # Enhanced description with additional context
+            enhanced_description = f"{title}: {description}"
+            if swc_id:
+                enhanced_description += f" (SWC-ID: {swc_id})"
+
+            # Add function information if available
+            if issue.get("function"):
+                enhanced_description += f" in function {issue.get('function')}"
+
+            # Add contract information if available
+            if issue.get("contract"):
+                enhanced_description += f" [Contract: {issue.get('contract')}]"
+
+            # Add code snippet if available
+            if issue.get("code"):
+                enhanced_description += f" | Code: {issue.get('code')}"
+
+            # Add gas usage information if available
+            if issue.get("max_gas_used") and issue.get("min_gas_used"):
+                enhanced_description += f" | Gas: {issue.get('min_gas_used')}-{issue.get('max_gas_used')}"
+
+            all_reports.append(Report(
+                tool="Mythril",
+                severity=severity_level,
+                description=enhanced_description,
+                file_path=file_path,
+                line_number=line_number,
+                language="solidity",
+                cwe=cwe
+            ))
+
+    logger.info(f"Mythril parsing completed: generated {len(all_reports)} reports")
+    if all_reports:
+        severity_counts = {}
+        for report in all_reports:
+            if hasattr(report, 'severity'):
+                severity = report.severity.value if hasattr(report.severity, 'value') else str(report.severity)
+                severity_counts[severity] = severity_counts.get(severity, 0) + 1
+        logger.info(f"Mythril report severity breakdown: {severity_counts}")
 
     return all_reports
 
