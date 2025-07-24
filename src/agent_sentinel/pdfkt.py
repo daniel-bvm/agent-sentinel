@@ -24,7 +24,7 @@ def markdown_to_pretty_pdf(markdown_text: str, css_path: str = None) -> BytesIO:
     </body>
     </html>
     """
-    
+
     # Render the final HTML with optional styling
     template = Template(html_template)
     html = template.render(html_body=html_body, css_path=css_path)
@@ -32,4 +32,6 @@ def markdown_to_pretty_pdf(markdown_text: str, css_path: str = None) -> BytesIO:
     with tempfile.NamedTemporaryFile(delete=True, suffix=".pdf") as temp_file:
         pdfkit.from_string(html, temp_file.name)
         temp_file.flush()
-        return BytesIO(temp_file.read())
+
+        with open(temp_file.name, "rb") as f:
+            return BytesIO(f.read())
