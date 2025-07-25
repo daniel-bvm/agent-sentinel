@@ -38,8 +38,8 @@ class AgentResourceManager:
     def __init__(self):
         self.resources: dict[str, str] = {}
         self.attachments: list[Attachment] = []
-        self.data_uri_pattern = regex.compile(r'data:[^;,]+;base64,[A-Za-z0-9+/]+=*', regex.IGNORECASE | regex.DOTALL)
-        self.resource_citing_pattern = regex.compile(r'"([^"]+)"', regex.IGNORECASE | regex.DOTALL)
+        self.data_uri_pattern = regex.compile(r'data:[^;,]+;base64,[A-Za-z0-9+/]+=*', regex.IGNORECASE | regex.DOTALL | regex.MULTILINE)
+        self.resource_citing_pattern = regex.compile(r'"([^"]+)"', regex.IGNORECASE | regex.DOTALL | regex.MULTILINE)
 
     def embed_resource(self, content: str) -> str:
         def replace_with_id(match: regex.Match[str]) -> str:
@@ -79,16 +79,21 @@ class AgentResourceManager:
         self.attachments.append(attachment)
         return attachment
 
-    async def handle_streaming_response(self, stream: AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None], cut: list[str] = [], cut_pats: list[str] = []) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
+    async def handle_streaming_response(
+        self, 
+        stream: AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None], 
+        cut_tags: list[str] = [], 
+        cut_pats: list[str] = []
+    ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
         buffer: str = ''
 
-        cut_tags_str = "|".join(cut)
-        tags_str = "file|img|data"
+        cut_tags_str = "|".join(cut_tags)
+        tags_str = "file|img|data|files"
 
         pattern_template = r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>"
 
         citing_pat_str = pattern_template.format(tags_str=tags_str)
-        cut_pat_str = pattern_template.format(tags_str=cut_tags_str) if cut_pats else ""
+        cut_pat_str = pattern_template.format(tags_str=cut_tags_str) if len(cut_pats) else ""
 
         if cut_pat_str:
             cut_pats.append(cut_pat_str)
@@ -96,9 +101,9 @@ class AgentResourceManager:
         if cut_pats:
             citing_pat = regex.compile("|".join([citing_pat_str, *cut_pats]), regex.DOTALL | regex.IGNORECASE)
         else:
-            citing_pat = regex.compile(citing_pat_str, regex.DOTALL | regex.IGNORECASE)
+            citing_pat = regex.compile(citing_pat_str, regex.DOTALL | regex.IGNORECASE | regex.MULTILINE)
 
-        cut_pat = regex.compile("|".join(cut_pats), regex.DOTALL | regex.IGNORECASE) if cut_pats else None
+        cut_pat = regex.compile("|".join(cut_pats), regex.DOTALL | regex.IGNORECASE | regex.MULTILINE) if len(cut_pats) else None
 
         logger.info("Watching for citing_pat: {}".format(citing_pat))
         logger.info("Watching for cut_pat: {}".format(cut_pat))

@@ -108,7 +108,7 @@ def normalize_cwe(cwe: str) -> str:
     return cwe.split(':')[0].strip().upper()
 
 VALIDATION_SYSTEM_PROMPT = """
-Your task is to confirm a security finding is valid or not, in one step. In case the severity level is not appropriate, change it and explain why.
+Your task is to confirm a security finding is valid or not, in one step. In case the severity level or description is not appropriate, change it and explain why.
 
 Found:
 {found}
@@ -119,7 +119,7 @@ Context:
 References:
 {references}
 
-By default, if no action is taken, the security issue finding is valid. In case the secret value found is just dummy, reject it. 
+By default, if no action is taken, the security issue finding is valid. In case the secret value found is just dummy, reject it. Description and CWE id provided are reliable, just make up the description to be more pretty if needed.  
 """
 
 VALIDATION_ACTION = [
@@ -137,7 +137,9 @@ VALIDATION_ACTION = [
                     }
                 }
             }
-        },
+        }
+    },
+    {
         "type": "function",
         "function": {
             "name": "change_severity_level",
@@ -162,6 +164,26 @@ VALIDATION_ACTION = [
                 }
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "change_description",
+            "description": "Change the description of the security issue finding",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "The description of the security issue finding if the current description is not appropriate",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "The reason for changing the description of the security issue finding"
+                    }
+                }
+            }
+        }
     }
 ]
 
@@ -175,6 +197,10 @@ def change_severity_level(report: Report, severity: str) -> Report:
         return report
 
     report.severity = SeverityLevel(severity)
+    return report
+
+def change_description(report: Report, description: str) -> Report:
+    report.description = description
     return report
 
 def is_match(report_1: Report, report_2: Report) -> bool:
@@ -310,7 +336,7 @@ async def confirm_report(report: Report, confirmed_reports: list[Report], deep_m
         args_json = json.loads(tool.function.arguments)
 
         if tool.function.name == 'reject':
-            logger.warning(f"Rejected security issue finding: {args_json.get('reason', 'Unknown reason')}")
+            logger.warning(f"Rejected security issue finding: {args_json.get('reason', 'Unknown reason')}; {report}")
             return None
 
         elif tool.function.name == 'change_severity_level':
@@ -320,8 +346,10 @@ async def confirm_report(report: Report, confirmed_reports: list[Report], deep_m
             if from_severity != to_severity:
                 logger.info(f"Changing severity level of security issue finding from {from_severity} to {to_severity}: {args_json.get('reason', 'Unknown reason')}")
                 report = change_severity_level(report, args_json.get('severity'))
-
-            break
+                
+        elif tool.function.name == 'change_description':
+            logger.info(f"Changing description of security issue finding: {args_json.get('description', 'Unknown description')} (Reason: {args_json.get('reason', 'Unknown reason')})")
+            report = change_description(report, args_json.get('description'))
 
     return report
 
@@ -516,7 +544,11 @@ Guidelines:
         # tool_choice="auto"
     )
 
-    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"], cut_pats=[r'^#+\s+']):
+    async for chunk in arm.handle_streaming_response(
+        wrapstream(generator, builder.add_chunk), 
+        cut_tags=["think", "ref", "refs"], 
+        cut_pats=[r'^#+\s+']
+    ):
         if event.is_set():
             break
 
@@ -624,7 +656,7 @@ async def generate_other_severity_report(
     
     # Add LLM recommendations for low priority issues
     if not event.is_set() and len(other_df) > 0:
-        yield wrap_chunk(random_uuid(), "\n### 💡 Recommendations\n\n", "assistant")
+        yield wrap_chunk(random_uuid(), "\n### 💡 Next Steps\n\n", "assistant")
 
         async for chunk in _generate_low_priority_recommendations(other_df, repo, arm, event):
             if event.is_set():
@@ -700,6 +732,7 @@ Provide practical, prioritized recommendations for addressing these low-priority
    - Long-term prevention strategies
 4. **Resource Planning**: Estimated effort and timeline recommendations
 5. **Monitoring & Prevention**: How to prevent similar issues in the future
+6. **Respond close to the context**: Reference to the current source code as much as possible 
 
 Keep your response practical, actionable, and focused on helping development teams efficiently address these issues. Use markdown formatting, bullet points for clarity and bold the headinngs. No intro needed.
 """
@@ -716,7 +749,11 @@ Keep your response practical, actionable, and focused on helping development tea
         messages=messages,
     )
 
-    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"], cut_pats=[r'^#+\s+']):
+    async for chunk in arm.handle_streaming_response(
+        wrapstream(generator, builder.add_chunk), 
+        cut_tags=["think", "ref", "refs"], 
+        cut_pats=[r'^#+\s+']
+    ):
         if event.is_set():
             break
 
@@ -851,7 +888,11 @@ Keep your response focused, practical, and include code examples where relevant.
         messages=messages,
     )
 
-    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"], cut_pats=[r'^#+\s+']):
+    async for chunk in arm.handle_streaming_response(
+        wrapstream(generator, builder.add_chunk), 
+        cut_tags=["think", "ref", "refs"], 
+        cut_pats=[r'^#+\s+']
+    ):
         if event.is_set():
             break
 
@@ -955,7 +996,6 @@ async def handoff(
             report: Report | None = await confirm_report(report, confirmed_reports, deep_mode, repo)
 
             if report is None:
-                logger.warning(f"Report is rejected...")
                 continue
 
             confirmed_reports.append(report)

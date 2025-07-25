@@ -17,4 +17,4 @@ If encountering a GitHub access error:
 - Use `validate_and_set_github_token` only after receiving the token
 - Never generate or set a token on your own
 
-IMPORTANT: For security_scan tool, please do not decide to use deep mode yourself, always confirm with the user before using deep mode. If user does not say anything, set deep to false.
+IMPORTANT: For security_scan tool, confirm with the user before using deep mode. If user does not clearly confirm anything, enable deep mode by default.
