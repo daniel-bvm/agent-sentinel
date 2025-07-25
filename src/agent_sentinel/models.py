@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import Any
+import re
 
 cwe_mapping = {
     "B101": "CWE-78",  # assert_used
@@ -105,7 +106,9 @@ class Report:
         line_number: str | None = None,
         language: str = "code",
         cwe: str | None = None,
-        cve: str | None = None
+        cve: str | None = None,
+        information: str | None = None,
+        report_type: str | None = None
     ):
         """
         Initialize a security report.
@@ -116,8 +119,11 @@ class Report:
             description: Description of the security issue
             file_path: Optional path to the file where the issue was found
             line_number: Optional line number(s) where the issue was found
-            language: Programming language (default: "code")
+            language: Language of the code being scanned
             cwe: Common Weakness Enumeration identifier (default: "n/a")
+            cve: CVE identifier if available
+            information: Additional processed information based on report type
+            report_type: Type of report (e.g., 'secret', 'credentials', 'code', 'dependency')
         """
         self.tool = tool
 
@@ -139,6 +145,8 @@ class Report:
         self.language = language
         self.cwe = cwe
         self.cve = cve
+        self.information = information
+        self.report_type = report_type or language
 
     def __str__(self) -> str:
         """String representation of the report."""
@@ -168,7 +176,9 @@ class Report:
             "line_number": self.line_number,
             "language": self.language,
             "cwe": self.cwe,
-            "cve": self.cve
+            "cve": self.cve,
+            "information": self.information,
+            "processed_information": self.processed_information
         }
 
     @property
@@ -197,6 +207,56 @@ class Report:
         except ValueError:
             return start
 
+    @property
+    def processed_information(self) -> str | None:
+        """
+        Process and return information based on the report type.
+
+        Returns:
+            For 'dependency': package:version format
+            For 'secret': the secret value
+            For 'credentials'/'code': the information field as-is
+            For other report types: None
+        """
+        if not self.report_type or self.report_type.lower() not in ['secret', 'credentials', 'code', 'dependency']:
+            return None
+
+        report_type_lower = self.report_type.lower()
+
+        if report_type_lower == 'dependency':
+            # Extract package name and version from description
+            # Look for patterns like "Package: name" and "Installed version: version"
+            # or "Package name v version"
+
+            package_match = re.search(r'Package:\s*([^\s,]+)', self.description, re.IGNORECASE)
+            version_match = re.search(r'(?:Installed version|version):\s*([^\s,]+)', self.description, re.IGNORECASE)
+
+            # Alternative pattern: "Package name v version"
+            if not package_match or not version_match:
+                alt_match = re.search(r'Package\s+([^\s]+)\s+v?([^\s,:]+)', self.description, re.IGNORECASE)
+                if alt_match:
+                    return f"{alt_match.group(1)}:{alt_match.group(2)}"
+
+            if package_match and version_match:
+                return f"{package_match.group(1)}:{version_match.group(1)}"
+            elif package_match:
+                return package_match.group(1)
+
+            return self.information
+
+        elif report_type_lower == 'secret':
+            # Extract secret value from description (after "Value: ")
+            value_match = re.search(r'Value:\s*([^\s,]+)', self.description, re.IGNORECASE)
+            if value_match:
+                return value_match.group(1)
+            return self.information
+
+        elif report_type_lower in ['credentials', 'code']:
+            # Return information as-is
+            return self.information
+
+        return None
+
 class ErrorReport(Report):
     """
     Represents an error that occurred during security scanning.
@@ -220,14 +280,15 @@ class ErrorReport(Report):
             description=f"{tool} error: {reason}",
             file_path=None,
             line_number=None,
-            language="code",
-            cwe="n/a"
+            report_type="code",
+            cwe="n/a",
+            information=None
         )
         self.reason = reason
 
     def __repr__(self) -> str:
         """Detailed representation of the error report."""
-        return f"ErrorReport(tool='{self.tool}', severity='{self.severity}', description='{self.description}', reason='{self.reason}', file_path='{self.file_path}', line_number='{self.line_number}', language='{self.language}', cwe='{self.cwe}')"
+        return f"ErrorReport(tool='{self.tool}', severity='{self.severity}', description='{self.description}', reason='{self.reason}', file_path='{self.file_path}', line_number='{self.line_number}', report_type='{self.report_type}', cwe='{self.cwe}', information='{self.information}')"
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the error report to a dictionary."""

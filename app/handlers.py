@@ -211,6 +211,9 @@ def is_match(report_1: Report, report_2: Report) -> bool:
     if report_1.cwe != report_2.cwe:
         return False
 
+    if report_1.processed_information != report_2.processed_information:
+        return False
+
     return True
 
 import base64
