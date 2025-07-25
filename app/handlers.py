@@ -315,7 +315,9 @@ async def confirm_report(report: Report, confirmed_reports: list[Report], deep_m
             return None
 
         elif tool.function.name == 'change_severity_level':
-            logger.info(f"Changing severity level of security issue finding: {args_json.get('reason', 'Unknown reason')}")
+            from_severity = report.severity.value
+            to_severity = args_json.get('severity')
+            logger.info(f"Changing severity level of security issue finding from {from_severity} to {to_severity}: {args_json.get('reason', 'Unknown reason')}")
             report = change_severity_level(report, args_json.get('severity'))
             break
 

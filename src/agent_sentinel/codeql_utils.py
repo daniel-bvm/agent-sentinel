@@ -9,12 +9,6 @@ from threading import Lock
 from .models import Report, SeverityLevel
 
 single_call_lock = Lock()
-
-logging.basicConfig(
-    level=logging.WARNING,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 logger = logging.getLogger(__name__)
 
 CODEQL_SUPPORTED_LANGUAGES = [

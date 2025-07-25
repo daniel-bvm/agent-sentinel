@@ -10,11 +10,6 @@ import logging
 from pathlib import Path
 
 from .models import Report, SeverityLevel, ErrorReport
-
-logging.basicConfig(
-    level=logging.WARNING,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
 logger = logging.getLogger(__name__)
 
 SONARQUBE_SHELL_SCRIPT = "/opt/sonarqube/bin/linux-x86-64/sonar.sh"
