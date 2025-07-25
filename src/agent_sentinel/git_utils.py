@@ -187,4 +187,4 @@ class RepoInfo:
         with open(os.path.join(self.repo_path, file), 'r') as f:
             lines = f.readlines()
 
-        return '\n'.join(f'{content}' for i, content in enumerate(lines[line_start:line_end]))
+        return ''.join(lines[line_start:line_end])
