@@ -614,6 +614,102 @@ async def generate_other_severity_report(
             yield wrap_chunk(random_uuid(), f"- ... and {len(files) - 5} more files\n", "assistant")
         
         yield wrap_chunk(random_uuid(), "\n", "assistant")
+    
+    # Add LLM recommendations for low priority issues
+    if not event.is_set() and len(other_df) > 0:
+        yield wrap_chunk(random_uuid(), "\n### 💡 Recommendations\n\n", "assistant")
+
+        async for chunk in _generate_low_priority_recommendations(other_df, repo, arm, event):
+            if event.is_set():
+                break
+            yield chunk
+
+async def _generate_low_priority_recommendations(
+    df: DataFrame, 
+    repo: RepoInfo | None, 
+    arm: AgentResourceManager,
+    event: asyncio.Event
+) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
+    """Generate LLM recommendations for low priority security issues."""
+    
+    if event.is_set():
+        return
+    
+    # Prepare summary of all low priority issues
+    total_issues = len(df)
+    unique_cwes = df['cwe'].nunique()
+    affected_files = df['file_path'].nunique()
+    
+    # Get top CWEs by frequency
+    top_cwes = df['cwe'].value_counts().head(5)
+    cwe_details = []
+    
+    for cwe_id, count in top_cwes.items():
+        cwe_info = get_cwe_by_id(cwe_id)
+        cwe_name = f"CWE-{cwe_info.id}: {cwe_info.name}" if cwe_info else str(cwe_id)
+        cwe_details.append({
+            "id": cwe_id,
+            "name": cwe_name,
+            "count": count,
+            "description": cwe_info.description if cwe_info else "No description available"
+        })
+    
+    # Get sample file paths and descriptions
+    sample_issues = df.head(10)[['file_path', 'description', 'cwe', 'tool', 'line_start', 'line_end']].to_dict('records')
+    sample_issues['context'] = [repo.reveal_content(
+        issue['file_path'], 
+        issue['line_start'], 
+        issue['line_end'], 
+        A=3, B=3
+    ) if repo else None for issue in sample_issues]
+    sample_issues = sample_issues[['file_path', 'description', 'cwe', 'tool', 'context']]
+
+    system_prompt = f"""You are a cybersecurity consultant providing strategic recommendations for managing low-priority security issues.
+
+## Summary
+- **Total low priority issues:** {total_issues}
+- **Unique vulnerability types (CWEs):** {unique_cwes}
+- **Affected files:** {affected_files}
+
+## Top Vulnerability Types:
+{json.dumps(cwe_details)}
+
+## Sample Issues:
+{json.dumps(sample_issues)}
+
+## Task
+Provide practical, prioritized recommendations for addressing these low-priority security issues. Your response should include:
+
+1. **Risk Assessment**: Overall risk level and potential business impact of these low-priority issues
+2. **Prioritization Strategy**: How to prioritize fixing these issues (by CWE type, file criticality, etc.)
+3. **Remediation Approach**: 
+   - Quick wins that can be automated or batch-fixed
+   - Issues that require manual review
+   - Long-term prevention strategies
+4. **Resource Planning**: Estimated effort and timeline recommendations
+5. **Monitoring & Prevention**: How to prevent similar issues in the future
+
+Keep your response practical, actionable, and focused on helping development teams efficiently address these issues. Use markdown formatting and bullet points for clarity. No heading or intro needed.
+"""
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+    ]
+
+    builder = ChatCompletionResponseBuilder()
+    generator = create_streaming_response(
+        base_url=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        model=settings.llm_model_id,
+        messages=messages,
+    )
+
+    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"]):
+        if event.is_set():
+            break
+
+        if chunk.choices[0].delta.content:
+            yield chunk
 
 async def _generate_cwe_detailed_analysis(
     cwe_id: str, 
