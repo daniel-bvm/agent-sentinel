@@ -316,9 +316,7 @@ async def confirm_report(report: Report, confirmed_reports: list[Report], deep_m
         temperature=0.1
     )
 
-    tools = completion.choices[0].message.tool_calls
-
-    for tool in tools:
+    for tool in (completion.choices[0].message.tool_calls or []):
         args_json = json.loads(tool.function.arguments)
 
         if tool.function.name == 'reject':
@@ -765,10 +763,10 @@ async def _generate_cwe_detailed_analysis(
     cwe_name = f"CWE-{cwe_info.id}: {cwe_info.name}" if cwe_info else cwe_id
     
     # Header
-    icon = "🔥" if is_critical else "⚠️"
+    icon = "🔥 " if is_critical else "⚠️ "
     yield wrap_chunk(random_uuid(), f"### {icon} {cwe_name}\n\n", "assistant")
     
-    # CWE description
+    # CWE descriptionh
     if cwe_info:
         yield wrap_chunk(random_uuid(), f"**Description:** {cwe_info.description}\n\n", "assistant")
         
