@@ -4,7 +4,7 @@ WORKDIR /workspace
 
 COPY pyproject.toml pyproject.toml
 COPY src src
-RUN pip install . && rm -f pyproject.toml
+RUN pip install . --no-cache-dir && rm -f pyproject.toml
 
 COPY config.json config.json
 COPY system_prompt.txt system_prompt.txt

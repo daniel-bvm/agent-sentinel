@@ -787,7 +787,8 @@ async def _generate_cwe_detailed_analysis(
             "" if not report['line_number'] else f":{report['line_start']}"
         )
 
-        yield wrap_chunk(random_uuid(), f"**Issue {idx + 1}:** `{report['file_path']}{line_info}`\n", "assistant")
+        github_link = repo.get_reference(report['file_path'], line_start, line_end)
+        yield wrap_chunk(random_uuid(), f"**Issue {idx + 1}:** [{report['file_path']}{line_info}]({github_link})\n", "assistant")
         yield wrap_chunk(random_uuid(), f"- **Tool:** {report['tool']}\n", "assistant")
         yield wrap_chunk(random_uuid(), f"- **Severity:** {report['severity']}\n", "assistant")
         yield wrap_chunk(random_uuid(), f"- **Description:** {report['description']}\n", "assistant")
@@ -802,11 +803,7 @@ async def _generate_cwe_detailed_analysis(
                     context = repo.reveal_content(report['file_path'], line_start, line_end, A=3, B=3)
 
                     if context:
-                        yield wrap_chunk(random_uuid(), f"\n**Source Code Context:**\n```{report['language']}\n{context}\n```\n", "assistant")
-
-                    # GitHub link
-                    github_link = repo.get_reference(report['file_path'], line_start, line_end)
-                    yield wrap_chunk(random_uuid(), f"\n[📄 View on GitHub]({github_link})\n", "assistant")
+                        yield wrap_chunk(random_uuid(), f"\n**Context:**\n```{report['language']}\n{context}\n```\n", "assistant")
 
             except Exception as e:
                 logger.warning(f"Failed to get source context: {e}")
