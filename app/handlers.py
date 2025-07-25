@@ -98,10 +98,12 @@ fn_mapping = {
 }
 
 def fmt_report(report: Report, repo: RepoInfo | None = None) -> str:
+    line_info = report.line_start if report.line_start == report.line_end else f"{report.line_start}-{report.line_end}"
+
     if repo and report.line_start and report.line_end:
-        return f"[{report.file_path}:({report.line_start}:{report.line_end})]({repo.get_reference(report.file_path, report.line_start, report.line_end)}) - {report.description} (CWE: {report.cwe or 'N/A'}, CVE: {report.cve or 'N/A'}, Lang: {report.language})"
+        return f"[{report.file_path}:{line_info}]({repo.get_reference(report.file_path, report.line_start, report.line_end)}) - {report.description} (CWE: {report.cwe or 'N/A'}, CVE: {report.cve or 'N/A'}, Lang: {report.language})"
     else:
-        return f"{report.file_path}:{report.line_start}-{report.line_end} - {report.description} (CWE: {report.cwe or 'N/A'}, CVE: {report.cve or 'N/A'}, Lang: {report.language})"
+        return f"{report.file_path}:{line_info} - {report.description} (CWE: {report.cwe or 'N/A'}, CVE: {report.cve or 'N/A'}, Lang: {report.language})"
 
 def normalize_cwe(cwe: str) -> str:
     return cwe.split(':')[0].strip().upper()
@@ -509,7 +511,7 @@ Guidelines:
         # tool_choice="auto"
     )
 
-    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["ref", "refs", "think"]):
+    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"]):
         if event.is_set():
             break
 
@@ -664,7 +666,7 @@ async def _generate_low_priority_recommendations(
             A=3, B=3
         ) 
         if repo else None 
-        for issue in sample_issues
+        for i, issue in sample_issues.iterrows()
     ]
 
     sample_issues = sample_issues[['file_path', 'description', 'cwe', 'tool', 'context']].to_dict('records')
@@ -709,7 +711,7 @@ Keep your response practical, actionable, and focused on helping development tea
         messages=messages,
     )
 
-    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"], cut_pats=[r'^#+']):
+    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"], cut_pats=[r'^#+\s+']):
         if event.is_set():
             break
 
@@ -843,7 +845,7 @@ Keep your response focused, practical, and include code examples where relevant.
         messages=messages,
     )
 
-    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"], cut_pats=[r'^#+']):
+    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"], cut_pats=[r'^#+\s+']):
         if event.is_set():
             break
 
