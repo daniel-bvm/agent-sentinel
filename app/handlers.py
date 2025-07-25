@@ -108,7 +108,7 @@ def normalize_cwe(cwe: str) -> str:
     return cwe.split(':')[0].strip().upper()
 
 VALIDATION_SYSTEM_PROMPT = """
-Your task is to confirm a security finding is valid or not, in one step via tool-calls. In case the severity level or description is not appropriate, change it and explain why.
+Your task is to confirm whether a security finding is valid or not, in one step via tool calls. In case the severity level or description is not appropriate, change it and explain why. All information, including issue description and CWE ID are reliable; just make up the description to be prettier if needed, the current categorized CWE is set as intended.
 
 Found:
 {found}
@@ -119,26 +119,10 @@ Context:
 References:
 {references}
 
-By default, if no action is taken, the security issue finding is valid. In case the secret value found is just dummy or the current implement fully safe to keep, reject it. Description and CWE id provided are reliable, just make up the description to be more pretty if needed.
+By default, if no action is taken, the security issue finding is valid and need attention. In case the secret value found is just dummy or the current implement fully safe to keep, set the severity to SAFE. 
 """
 
 VALIDATION_ACTION = [
-    { 
-        "type": "function",
-        "function": {
-            "name": "reject",
-            "description": "Reject the current security issue finding if it is safe to keep based on the context and references",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "reason": {
-                        "type": "string",
-                        "description": "The reason for rejecting the security issue finding"
-                    }
-                }
-            }
-        }
-    },
     {
         "type": "function",
         "function": {
@@ -154,7 +138,8 @@ VALIDATION_ACTION = [
                             "LOW",
                             "MEDIUM",
                             "HIGH",
-                            "CRITICAL"
+                            "CRITICAL",
+                            "SAFE"
                         ]
                     },
                     "reason": {
@@ -343,6 +328,10 @@ async def confirm_report(report: Report, confirmed_reports: list[Report], deep_m
         elif tool.function.name == 'change_severity_level':
             from_severity = report.severity.value
             to_severity = args_json.get('severity')
+
+            if to_severity.upper() == 'SAFE':
+                logger.info(f"Rejecting security issue finding: {args_json.get('reason', 'Unknown reason')}")
+                return None
 
             if from_severity != to_severity:
                 logger.info(f"Changing severity level of security issue finding from {from_severity} to {to_severity}: {args_json.get('reason', 'Unknown reason')}")
