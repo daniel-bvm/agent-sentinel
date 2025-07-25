@@ -189,6 +189,9 @@ def change_description(report: Report, description: str) -> Report:
     return report
 
 def is_match(report_1: Report, report_2: Report) -> bool:
+    if report_1.language.lower() in ['secret', 'credentials', 'code', 'dependency']:
+        return False
+
     if report_1.file_path != report_2.file_path:
         return False
 
