@@ -79,20 +79,20 @@ class AgentResourceManager:
         self.attachments.append(attachment)
         return attachment
 
-    async def handle_streaming_response(self, stream: AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None], cut: list[str] = []) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
+    async def handle_streaming_response(self, stream: AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None], cut: list[str] = [], cut_pats: list[str] = []) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
         buffer: str = ''
         
         tags_str = "|".join(["file|img|data", *cut])
         cut_tags_str = "|".join(cut)
 
         citing_pat = regex.compile(
-            r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>".format(tags_str=tags_str), 
-            regex.DOTALL | regex.IGNORECASE
+            r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>{cut_pats}".format(tags_str=tags_str, cut_pats="|" + "|".join(cut_pats)), 
+            regex.DOTALL | regex.IGNORECASE | regex.MULTILINE
         )
 
         cut_pat = regex.compile(
-            r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>".format(tags_str=cut_tags_str), 
-            regex.DOTALL | regex.IGNORECASE
+            r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>{cut_pats}".format(tags_str=cut_tags_str, cut_pats="|" + "|".join(cut_pats)), 
+            regex.DOTALL | regex.IGNORECASE | regex.MULTILINE
         )
 
         async for chunk in stream:

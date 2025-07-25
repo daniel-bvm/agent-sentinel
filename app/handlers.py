@@ -655,14 +655,19 @@ async def _generate_low_priority_recommendations(
         })
     
     # Get sample file paths and descriptions
-    sample_issues = df.head(10)[['file_path', 'description', 'cwe', 'tool', 'line_start', 'line_end']].to_dict('records')
-    sample_issues['context'] = [repo.reveal_content(
-        issue['file_path'], 
-        issue['line_start'], 
-        issue['line_end'], 
-        A=3, B=3
-    ) if repo else None for issue in sample_issues]
-    sample_issues = sample_issues[['file_path', 'description', 'cwe', 'tool', 'context']]
+    sample_issues = df.head(10)[['file_path', 'description', 'cwe', 'tool', 'line_start', 'line_end']]
+    sample_issues['context'] = [
+        repo.reveal_content(
+            issue['file_path'], 
+            issue['line_start'], 
+            issue['line_end'], 
+            A=3, B=3
+        ) 
+        if repo else None 
+        for issue in sample_issues
+    ]
+
+    sample_issues = sample_issues[['file_path', 'description', 'cwe', 'tool', 'context']].to_dict('records')
 
     system_prompt = f"""You are a cybersecurity consultant providing strategic recommendations for managing low-priority security issues.
 
@@ -689,7 +694,7 @@ Provide practical, prioritized recommendations for addressing these low-priority
 4. **Resource Planning**: Estimated effort and timeline recommendations
 5. **Monitoring & Prevention**: How to prevent similar issues in the future
 
-Keep your response practical, actionable, and focused on helping development teams efficiently address these issues. Use markdown formatting and bullet points for clarity. No heading or intro needed.
+Keep your response practical, actionable, and focused on helping development teams efficiently address these issues. Use markdown formatting, bullet points for clarity and bold the headinngs. No intro needed.
 """
 
     messages = [
@@ -704,7 +709,7 @@ Keep your response practical, actionable, and focused on helping development tea
         messages=messages,
     )
 
-    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"]):
+    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"], cut_pats=[r'^#+']):
         if event.is_set():
             break
 
@@ -822,7 +827,7 @@ Please provide:
 2. **Remediation Steps**: Specific, actionable steps to fix this vulnerability type
 3. **Prevention Tips**: Best practices to prevent this issue in the future
 
-Keep your response focused, practical, and include code examples where relevant. Use markdown formatting. No heading or intro needed.
+Keep your response focused, practical, and include code examples where relevant. Use markdown formatting, bullet points for clarity and bold the headinngs. No intro needed.
 """
 
     messages = [
@@ -838,13 +843,12 @@ Keep your response focused, practical, and include code examples where relevant.
         messages=messages,
     )
 
-    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"]):
+    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"], cut_pats=[r'^#+']):
         if event.is_set():
             break
 
         if chunk.choices[0].delta.content:
             yield chunk
-
     yield wrap_chunk(random_uuid(), "\n---\n\n", "assistant")
 
 async def generate_security_deep_report(
