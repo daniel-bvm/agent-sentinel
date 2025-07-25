@@ -99,7 +99,7 @@ class AgentResourceManager:
             cut_pats.append(cut_pat_str)
 
         if cut_pats:
-            citing_pat = regex.compile("|".join([citing_pat_str, *cut_pats]), regex.DOTALL | regex.IGNORECASE)
+            citing_pat = regex.compile("|".join([citing_pat_str, *cut_pats]), regex.DOTALL | regex.IGNORECASE | regex.MULTILINE)
         else:
             citing_pat = regex.compile(citing_pat_str, regex.DOTALL | regex.IGNORECASE | regex.MULTILINE)
 

@@ -108,7 +108,7 @@ def normalize_cwe(cwe: str) -> str:
     return cwe.split(':')[0].strip().upper()
 
 VALIDATION_SYSTEM_PROMPT = """
-Your task is to confirm a security finding is valid or not, in one step. In case the severity level or description is not appropriate, change it and explain why.
+Your task is to confirm a security finding is valid or not, in one step via tool-calls. In case the severity level or description is not appropriate, change it and explain why.
 
 Found:
 {found}
@@ -119,7 +119,7 @@ Context:
 References:
 {references}
 
-By default, if no action is taken, the security issue finding is valid. In case the secret value found is just dummy, reject it. Description and CWE id provided are reliable, just make up the description to be more pretty if needed.  
+By default, if no action is taken, the security issue finding is valid. In case the secret value found is just dummy or the current implement fully safe to keep, reject it. Description and CWE id provided are reliable, just make up the description to be more pretty if needed.
 """
 
 VALIDATION_ACTION = [
@@ -127,7 +127,7 @@ VALIDATION_ACTION = [
         "type": "function",
         "function": {
             "name": "reject",
-            "description": "Reject the security issue finding",
+            "description": "Reject the current security issue finding if it is safe to keep based on the context and references",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -327,7 +327,8 @@ async def confirm_report(report: Report, confirmed_reports: list[Report], deep_m
         model=settings.llm_model_id,
         messages=messages,
         tools=VALIDATION_ACTION,
-        tool_choice="auto"
+        tool_choice="auto",
+        temperature=0.1
     )
 
     tools = completion.choices[0].message.tool_calls
@@ -526,7 +527,7 @@ Create a professional executive summary that:
 Guidelines:
 1. Use the data preview to understand the context of the security issues
 2. Use the severity distribution to understand the risk of the security issues
-3. Keep your response practical, actionable, and focused on helping development teams efficiently address these issues. Use markdown formatting, bullet points for clarity and bold the headinngs.
+3. Keep your response practical, actionable, and focused on helping development teams efficiently address these issues. Use markdown format, bullet points to clarify and bold the headinngs.
 """
 
     messages = [
@@ -547,7 +548,7 @@ Guidelines:
     async for chunk in arm.handle_streaming_response(
         wrapstream(generator, builder.add_chunk), 
         cut_tags=["think", "ref", "refs"], 
-        cut_pats=[r'^#+\s+']
+        cut_pats=[r'^#+\s*']
     ):
         if event.is_set():
             break
@@ -752,7 +753,7 @@ Keep your response practical, actionable, and focused on helping development tea
     async for chunk in arm.handle_streaming_response(
         wrapstream(generator, builder.add_chunk), 
         cut_tags=["think", "ref", "refs"], 
-        cut_pats=[r'^#+\s+']
+        cut_pats=[r'^#+\s*']
     ):
         if event.is_set():
             break
@@ -795,7 +796,10 @@ async def _generate_cwe_detailed_analysis(
             break
 
         # Issue details
-        line_info = f":{report['line_start']}-{report['line_end']}" if report['line_start'] and report['line_end'] else ""
+        line_info = f":{report['line_start']}-{report['line_end']}" if report['line_start'] and report['line_end'] and report['line_start'] != report['line_end'] else (
+            "" if not report['line_number'] else f":{report['line_start']}"
+        )
+
         yield wrap_chunk(random_uuid(), f"**Issue {idx + 1}:** `{report['file_path']}{line_info}`\n", "assistant")
         yield wrap_chunk(random_uuid(), f"- **Tool:** {report['tool']}\n", "assistant")
         yield wrap_chunk(random_uuid(), f"- **Severity:** {report['severity']}\n", "assistant")
@@ -891,7 +895,7 @@ Keep your response focused, practical, and include code examples where relevant.
     async for chunk in arm.handle_streaming_response(
         wrapstream(generator, builder.add_chunk), 
         cut_tags=["think", "ref", "refs"], 
-        cut_pats=[r'^#+\s+']
+        cut_pats=[r'^#+\s*']
     ):
         if event.is_set():
             break

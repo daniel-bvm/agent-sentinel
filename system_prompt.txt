@@ -11,10 +11,4 @@ Include:
 - Line numbers for code issues (if available)
 - Package names, versions, and vulnerability details for dependency issues
 
-If encountering a GitHub access error:
-- Prompt the user to provide a GitHub Personal Access Token (PAT)
-- Use `provide_guide_for_github_access_token` to help them
-- Use `validate_and_set_github_token` only after receiving the token
-- Never generate or set a token on your own
-
-IMPORTANT: For security_scan tool, confirm with the user before using deep mode. If user does not clearly confirm anything, enable deep mode by default.
+IMPORTANT: For security_scan tool, confirm with the user before using deep mode. If user does not clearly confirm anything, enable deep mode by default. If the repo is not accessible, ask the user to provide a valid personal access token, install the token via validate_and_set_github_token and try scanning again.  

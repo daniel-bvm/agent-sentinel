@@ -24,15 +24,6 @@ def validate_and_set_github_token(token: str | None = None) -> str:
     """
     return github_utils.validate_and_set_github_token(token)
 
-
-@mcp.tool()
-def provide_guide_for_github_access_token() -> str:
-    """
-    Provide a guide for obtaining a GitHub personal access token.
-    """
-    return github_utils.provide_guide_for_github_access_token()
-
-
 @audit_mcp.tool()
 async def security_scan(repo_url: str, subfolder: str = "", branch_name: str = None, deep: bool = True) -> AsyncGenerator[Report | ErrorReport, None]:
     """
