@@ -125,15 +125,15 @@ def _get_directory_tree(path: str) -> dict | list:
             inspect = _get_directory_tree(os.path.join(path, entry))
 
             if isinstance(inspect, dict): # directory
-                if 'dir' not in info:
-                    info['dir'] = []
+                if 'directories' not in info:
+                    info['directories'] = []
 
-                info['dir'].append(inspect)
+                info['directories'].append(inspect)
             else: # file
-                if 'file' not in info:
-                    info['file'] = []
+                if 'files' not in info:
+                    info['files'] = []
 
-                info['file'].append(inspect)
+                info['files'].append(inspect)
         
     except PermissionError:
         logger.info(f"Permission denied for {path}")
