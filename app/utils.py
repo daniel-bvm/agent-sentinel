@@ -79,9 +79,21 @@ class AgentResourceManager:
         self.attachments.append(attachment)
         return attachment
 
-    async def handle_streaming_response(self, stream: AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
+    async def handle_streaming_response(self, stream: AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None], cut: list[str] = []) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
         buffer: str = ''
-        citing_pat = regex.compile(r"<(file|img|data)\b[^>]*>(.*?)</\1>|<(file|img|data)\b[^>]*/>", regex.DOTALL | regex.IGNORECASE)
+        
+        tags_str = "|".join(["file|img|data", *cut])
+        cut_tags_str = "|".join(cut)
+
+        citing_pat = regex.compile(
+            r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>".format(tags_str=tags_str), 
+            regex.DOTALL | regex.IGNORECASE
+        )
+
+        cut_pat = regex.compile(
+            r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>".format(tags_str=cut_tags_str), 
+            regex.DOTALL | regex.IGNORECASE
+        )
 
         async for chunk in stream:
             if isinstance(chunk, ErrorResponse):
@@ -103,7 +115,9 @@ class AgentResourceManager:
 
                 continue
 
-            yield wrap_chunk(random_uuid(), self.reveal_resource(buffer), 'assistant')
+            if cut_pat.match(buffer) is None:
+                yield wrap_chunk(random_uuid(), self.reveal_resource(buffer), 'assistant')
+
             buffer = ''
 
         if buffer:

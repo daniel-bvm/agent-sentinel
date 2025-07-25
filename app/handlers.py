@@ -16,7 +16,7 @@ import json
 from mcp.types import TextContent, EmbeddedResource
 import re
 from src.agent_sentinel.utils import detect_project_languages
-
+from collections import Counter
 
 logger = logging.getLogger(__name__)
 
@@ -72,13 +72,15 @@ async def get_system_prompt(messages: list[ChatCompletionMessageParam] | list[di
 
     if attach_repo_info:
         base += f"\n{repo_info_str}"
+        
+    logger.info(f"System prompt: {base}")
 
     return base
 
 from src.agent_sentinel import mcp as git_action_mcp, audit_mcp as source_code_mcp, main as security_scanners
 from src.agent_sentinel.utils import merge_reports, Report, ErrorReport, SeverityLevel
 from src.agent_sentinel.git_utils import RepoInfo, clone_repo, get_directory_tree 
-from src.agent_sentinel.cwe_utils import get_cwe_by_id
+from src.agent_sentinel.cwe_utils import get_cwe_by_id, CWEWeakness
 import openai
 
 class FullyHandoff(OpenAIBaseModel): pass
@@ -99,7 +101,7 @@ def fmt_report(report: Report, repo: RepoInfo | None = None) -> str:
     if repo and report.line_start and report.line_end:
         return f"[{report.file_path}:({report.line_start}:{report.line_end})]({repo.get_reference(report.file_path, report.line_start, report.line_end)}) - {report.description} (CWE: {report.cwe or 'N/A'}, CVE: {report.cve or 'N/A'}, Lang: {report.language})"
     else:
-        return f"{report.file_path}:{report.line_number} - {report.description} (CWE: {report.cwe or 'N/A'}, CVE: {report.cve or 'N/A'}, Lang: {report.language})"
+        return f"{report.file_path}:{report.line_start}-{report.line_end} - {report.description} (CWE: {report.cwe or 'N/A'}, CVE: {report.cve or 'N/A'}, Lang: {report.language})"
 
 def normalize_cwe(cwe: str) -> str:
     return cwe.split(':')[0].strip().upper()
@@ -321,35 +323,35 @@ from pandas import DataFrame
 import pandas as pd
 
 REPORT_WRITTING_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "include_table",
-            "description": "Respond a table in markdown format to the user. Return a label to reference to.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "df_id": {
-                        "type": "string",
-                        "description": "The id of the dataframe to include in the report",
-                        "enum": [
-                            "high_severity_df",
-                            "medium_severity_df",
-                            "other_df"
-                        ]
-                    },
-                    "columns": {
-                        "type": "array",
-                        "description": "Columns in the dataframe to include in the report",
-                        "items": {
-                            "type": "string"
-                        }
-                    }
-                },
-                "required": ["df_id", "columns"]
-            }
-        }
-    },
+    # {
+    #     "type": "function",
+    #     "function": {
+    #         "name": "include_table",
+    #         "description": "Respond a table in markdown format to the user. Return a label to reference to.",
+    #         "parameters": {
+    #             "type": "object",
+    #             "properties": {
+    #                 "df_id": {
+    #                     "type": "string",
+    #                     "description": "The id of the dataframe to include in the report",
+    #                     "enum": [
+    #                         "high_severity_df",
+    #                         "medium_severity_df",
+    #                         "other_df"
+    #                     ]
+    #                 },
+    #                 "columns": {
+    #                     "type": "array",
+    #                     "description": "Columns in the dataframe to include in the report",
+    #                     "items": {
+    #                         "type": "string"
+    #                     }
+    #                 }
+    #             },
+    #             "required": ["df_id", "columns"]
+    #         }
+    #     }
+    # },
     {
         "type": "function",
         "function": {
@@ -358,15 +360,6 @@ REPORT_WRITTING_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "df_id": {
-                        "type": "string",
-                        "description": "The id of the dataframe to include in the report",
-                        "enum": [
-                            "high_severity_df",
-                            "medium_severity_df",
-                            "other_df"
-                        ]
-                    },
                     "chart_type": {
                         "type": "string",
                         "description": "The type of the chart to include in the report",
@@ -442,198 +435,107 @@ def generate_chart_markdown(df: DataFrame, chart_type: str, x_axis: str, y_axis:
         logger.error(f"Error generating chart: {e}", exc_info=True)
         return f"Error generating chart: {str(e)}"
 
-async def generate_enhanced_report_with_tools(
-    df: DataFrame,
-    repo: RepoInfo | None,
-    section_name: str,
-    severity_filter: list[str],
-    event: asyncio.Event
-) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
-    """Generate enhanced report section with LLM tools for tables and charts."""
-    
-    filtered_df = df[df['severity'].isin(severity_filter)] if severity_filter else df
-    
-    if len(filtered_df) == 0:
-        yield wrap_chunk(random_uuid(), f"\n## {section_name}\n\n✅ **No issues found in this category.**\n\n", "assistant")
-        return
-    
-    yield wrap_chunk(random_uuid(), f"\n## {section_name} ({len(filtered_df)} found)\n\n", "assistant")
-    
-    # Prepare context and dataframes for LLM tools
-    context = {
-        "total_issues": len(filtered_df),
-        "severity_breakdown": filtered_df['severity'].value_counts().to_dict(),
-        "tool_breakdown": filtered_df['tool'].value_counts().to_dict(),
-        "cwe_breakdown": filtered_df['cwe'].value_counts().to_dict(),
-        "language_breakdown": filtered_df['language'].value_counts().to_dict()
-    }
-    
-    # Store dataframes for tool access (in a real implementation, this would be handled differently)
-    global temp_dfs
-    temp_dfs = {
-        "filtered_df": filtered_df,
-        "context": context
-    }
-    
-    # Create system prompt for LLM with tool access
-    system_prompt = f"""You are a cybersecurity expert creating a detailed security report section.
-
-Section: {section_name}
-Context: {json.dumps(context, indent=2)}
-
-Available tools:
-- include_table: Generate markdown tables from the data
-- include_chart: Generate charts (bar, pie, line) from the data
-
-You have access to a dataframe called "filtered_df" with columns: {list(filtered_df.columns)}
-
-Create a comprehensive analysis that includes:
-1. Overview of the issues in this severity category
-2. Key patterns and trends (use charts/tables to illustrate)
-3. Risk assessment and prioritization
-4. Specific recommendations
-
-Use the tools to create informative visualizations. Reference tables and charts with their returned IDs.
-"""
-
-    tools = REPORT_WRITTING_TOOLS
-
-    client = openai.AsyncClient(
-        base_url=settings.llm_base_url, 
-        api_key=settings.llm_api_key
-    )
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"Generate a comprehensive analysis for the {section_name} section."}
-    ]
-    
-    try:
-        completion = await client.chat.completions.create(
-            model=settings.llm_model_id,
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            stream=True
-        )
-        
-        async for chunk in completion:
-            if event.is_set():
-                break
-            if chunk.choices[0].delta.content:
-                yield wrap_chunk(random_uuid(), chunk.choices[0].delta.content, "assistant")
-            elif chunk.choices[0].delta.tool_calls:
-                # Handle tool calls
-                for tool_call in chunk.choices[0].delta.tool_calls:
-                    if tool_call.function.name == "include_table":
-                        args = json.loads(tool_call.function.arguments)
-                        df_id = args.get("df_id", "filtered_df")
-                        columns = args.get("columns", [])
-                        
-                        # Generate table
-                        table_md = generate_table_markdown(filtered_df, columns)
-                        table_id = f"table_{random_uuid()[-8:]}"
-                        
-                        yield wrap_chunk(random_uuid(), f"\n**Table {table_id}:**\n{table_md}\n\n", "assistant")
-                        
-                    elif tool_call.function.name == "include_chart":
-                        args = json.loads(tool_call.function.arguments)
-                        chart_type = args.get("chart_type", "bar")
-                        x_axis = args.get("x_axis", "severity")
-                        y_axis = args.get("y_axis", "count")
-                        
-                        # Generate chart
-                        chart_md = generate_chart_markdown(filtered_df, chart_type, x_axis, y_axis)
-                        chart_id = f"chart_{random_uuid()[-8:]}"
-                        
-                        yield wrap_chunk(random_uuid(), f"\n**Chart {chart_id}:**\n{chart_md}\n\n", "assistant")
-                
-    except Exception as e:
-        logger.error(f"Error generating enhanced report: {e}")
-        # Fallback to basic analysis
-        yield wrap_chunk(random_uuid(), f"Analysis of {len(filtered_df)} issues in {section_name}.\n\n", "assistant")
-
-async def generate_headline(df: DataFrame, repo: RepoInfo | None, event: asyncio.Event) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
+async def generate_headline(df: DataFrame, repo: RepoInfo | None, arm: AgentResourceManager, event: asyncio.Event) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     """Generate executive summary and overview of the security scan results."""
     
     total_issues = len(df)
-    if total_issues == 0:
-        yield wrap_chunk(random_uuid(), "# Security Report\n\n✅ **No security issues found!** The repository appears to be well-secured.\n\n", "assistant")
-        return
-    
-    # Generate statistics
     severity_stats = df['severity'].value_counts().to_dict()
     tool_stats = df['tool'].value_counts().to_dict()
     language_stats = df['language'].value_counts().to_dict()
-    cwe_stats = df['cwe'].value_counts().to_dict()
-    
+
+    cwe_counter = Counter()
+    for cwe_list in df['cwe'].dropna():
+        for cwe in map(str.strip, str(cwe_list).split(',')):
+            if cwe:
+                cwe_counter[cwe] += 1
+
+    cwe_stats = dict(cwe_counter)
+    top5_cwes = sorted(cwe_stats.items(), key=lambda x: x[1], reverse=True)[:5]
+
+    cwe_objs = [
+        get_cwe_by_id(cwe_id) 
+        for cwe_id, _ in top5_cwes
+    ]
+
     # Create context for LLM
     context = {
         "total_issues": total_issues,
         "severity_breakdown": severity_stats,
         "tools_used": list(tool_stats.keys()),
         "languages_scanned": list(language_stats.keys()),
-        "top_cwes": list(cwe_stats.keys())[:5],
-        "repo_url": repo.repo_url if repo else "Unknown"
+        "top_cwes": [
+            f"CWE-{cwe.id}: {cwe.name} ({cwe.description})" 
+            for cwe in cwe_objs 
+            if cwe is not None
+        ],
+        "repo_url": repo.repo_url if repo else "Unknown",
+        "data_preview": df.head(5).to_json(orient="records")
     }
     
     system_prompt = f"""You are a cybersecurity expert creating an executive summary for a security scan report.
 
-    Scan Results Context:
-    - Total Issues Found: {context['total_issues']}
-    - Severity Distribution: {context['severity_breakdown']}
-    - Tools Used: {', '.join(context['tools_used'])}
-    - Languages Scanned: {', '.join(context['languages_scanned'])}
-    - Top CWEs: {', '.join(context['top_cwes'])}
-    - Repository: {context['repo_url']}
+Scan Results Context:
+- Total Issues Found: {context['total_issues']}
+- Severity Distribution: {context['severity_breakdown']}
+- Tools Used: {', '.join(context['tools_used'])}
+- Languages Scanned: {', '.join(context['languages_scanned'])}
+- Top CWEs: {', '.join(context['top_cwes'])}
+- Repository: {context['repo_url']}
 
-    Create a professional executive summary that:
-    1. Starts with a clear headline and security status
-    2. Provides key findings and risk assessment
-    3. Highlights the most critical issues that need immediate attention
-    4. Is concise but informative (2-3 paragraphs)
-    5. Uses appropriate security terminology
-    """
-    
-    client = openai.AsyncClient(
-        base_url=settings.llm_base_url, 
-        api_key=settings.llm_api_key
-    )
+Create a professional executive summary that:
+1. Starts with a clear headline and security status
+2. Provides key findings and risk assessment
+3. Highlights the most critical issues that need immediate attention
+4. Is concise but informative (2-3 paragraphs)
+5. Uses appropriate security terminology
+
+Guidelines:
+1. Use the data preview to understand the context of the security issues
+2. Use the severity distribution to understand the risk of the security issues
+"""
 
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": "Generate the executive summary for this security scan report."}
     ]
     
-    try:
-        completion = await client.chat.completions.create(
-            model=settings.llm_model_id,
-            messages=messages,
-            stream=True
-        )
-        
-        async for chunk in completion:
-            if chunk.choices[0].delta.content:
-                yield wrap_chunk(random_uuid(), chunk.choices[0].delta.content, "assistant")
-                
-    except Exception as e:
-        logger.error(f"Error generating headline: {e}")
-        yield wrap_chunk(random_uuid(), f"# Security Report\n\n🔍 **{total_issues} security issues found** across {len(tool_stats)} tools.\n\n", "assistant")
+    builder = ChatCompletionResponseBuilder()
+    generator = create_streaming_response(
+        base_url=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        model=settings.llm_model_id,
+        messages=messages,
+        # tools=REPORT_WRITTING_TOOLS,
+        # tool_choice="auto"
+    )
 
+    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["ref", "refs", "think"]):
+        if event.is_set():
+            break
+
+        if chunk.choices[0].delta.content:
+            yield chunk
+
+    completion = await builder.build()
+    
+    messages.append({
+        "role": "assistant",
+        "content": completion.choices[0].message.content,
+        "tool_calls": [
+            {}
+        ]
+    })      
+        
 async def generate_high_severity_report(
     df: DataFrame,
     repo: RepoInfo | None,
+    arm: AgentResourceManager,
     event: asyncio.Event
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     """Generate detailed report for CRITICAL and HIGH severity issues."""
     
     # Include both CRITICAL and HIGH severity
     critical_high_df = df[df['severity'].isin(['CRITICAL', 'HIGH'])]
-    
-    if len(critical_high_df) == 0:
-        yield wrap_chunk(random_uuid(), "\n## 🟢 Critical & High Severity Issues\n\n✅ **No critical or high severity issues found.**\n\n", "assistant")
-        return
-    
     yield wrap_chunk(random_uuid(), f"\n## 🔴 Critical & High Severity Issues ({len(critical_high_df)} found)\n\n", "assistant")
     
     # Group by CWE for better organization
@@ -643,22 +545,18 @@ async def generate_high_severity_report(
         if event.is_set():
             break
             
-        async for chunk in _generate_cwe_detailed_analysis(cwe_id, group, repo, event, is_critical=True):
+        async for chunk in _generate_cwe_detailed_analysis(cwe_id, group, repo, arm, event, is_critical=True):
             yield chunk
 
 async def generate_medium_severity_report(
     df: DataFrame,
     repo: RepoInfo | None,
+    arm: AgentResourceManager,
     event: asyncio.Event
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     """Generate detailed report for MEDIUM severity issues."""
     
     medium_df = df[df['severity'] == 'MEDIUM']
-    
-    if len(medium_df) == 0:
-        yield wrap_chunk(random_uuid(), "\n## 🟡 Medium Severity Issues\n\n✅ **No medium severity issues found.**\n\n", "assistant")
-        return
-    
     yield wrap_chunk(random_uuid(), f"\n## 🟡 Medium Severity Issues ({len(medium_df)} found)\n\n", "assistant")
     
     # Group by CWE for better organization
@@ -668,22 +566,18 @@ async def generate_medium_severity_report(
         if event.is_set():
             break
             
-        async for chunk in _generate_cwe_detailed_analysis(cwe_id, group, repo, event, is_critical=False):
+        async for chunk in _generate_cwe_detailed_analysis(cwe_id, group, repo, arm, event, is_critical=False):
             yield chunk
     
 async def generate_other_severity_report(
     df: DataFrame,
     repo: RepoInfo | None,
+    arm: AgentResourceManager,
     event: asyncio.Event
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     """Generate summary report for LOW severity and other issues."""
     
     other_df = df[~df['severity'].isin(['CRITICAL', 'HIGH', 'MEDIUM'])]
-    
-    if len(other_df) == 0:
-        yield wrap_chunk(random_uuid(), "\n## 🟢 Low Severity & Other Issues\n\n✅ **No low severity issues found.**\n\n", "assistant")
-        return
-    
     yield wrap_chunk(random_uuid(), f"\n## 🟢 Low Severity & Other Issues ({len(other_df)} found)\n\n", "assistant")
     
     # For low severity, provide a summary grouped by CWE rather than individual analysis
@@ -725,6 +619,7 @@ async def _generate_cwe_detailed_analysis(
     cwe_id: str, 
     group: DataFrame, 
     repo: RepoInfo | None, 
+    arm: AgentResourceManager,
     event: asyncio.Event,
     is_critical: bool = False
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
@@ -749,14 +644,13 @@ async def _generate_cwe_detailed_analysis(
     for idx, (_, report) in enumerate(group.iterrows()):
         if event.is_set():
             break
-            
+
         if idx >= 5 and not is_critical:  # Limit non-critical issues
-            remaining = len(group) - idx
-            yield wrap_chunk(random_uuid(), f"*... and {remaining} more similar issues*\n\n", "assistant")
+            yield wrap_chunk(random_uuid(), f"*... and {len(group) - idx} more issues*\n\n", "assistant")
             break
-        
+
         # Issue details
-        yield wrap_chunk(random_uuid(), f"**Issue {idx + 1}:** `{report['file_path']}:{report['line_number']}`\n", "assistant")
+        yield wrap_chunk(random_uuid(), f"**Issue {idx + 1}:** `{report['file_path']}:{report['line_start']}-{report['line_end']}`\n", "assistant")
         yield wrap_chunk(random_uuid(), f"- **Tool:** {report['tool']}\n", "assistant")
         yield wrap_chunk(random_uuid(), f"- **Severity:** {report['severity']}\n", "assistant")
         yield wrap_chunk(random_uuid(), f"- **Description:** {report['description']}\n", "assistant")
@@ -764,31 +658,33 @@ async def _generate_cwe_detailed_analysis(
         # Show source code context if available
         if repo and report['file_path'] and report['line_number']:
             try:
-                line_start = int(str(report['line_number']).split('-')[0]) if report['line_number'] else None
-                line_end = int(str(report['line_number']).split('-')[-1]) if report['line_number'] else line_start
-                
-                if line_start:
+                line_start = report['line_start']
+                line_end = report['line_end']
+
+                if line_start and line_end:
                     context = repo.reveal_content(report['file_path'], line_start, line_end, A=3, B=3)
+
                     if context:
                         yield wrap_chunk(random_uuid(), f"\n**Source Code Context:**\n```{report['language']}\n{context}\n```\n", "assistant")
-                        
+
                     # GitHub link
                     github_link = repo.get_reference(report['file_path'], line_start, line_end)
                     yield wrap_chunk(random_uuid(), f"\n[📄 View on GitHub]({github_link})\n", "assistant")
-                    
+
             except Exception as e:
                 logger.warning(f"Failed to get source context: {e}")
-        
+
         yield wrap_chunk(random_uuid(), "\n", "assistant")
     
     # Generate LLM analysis for exploitation examples and fixes
-    async for chunk in _generate_cwe_analysis_with_llm(cwe_info, group, repo, event, is_critical):
+    async for chunk in _generate_cwe_analysis_with_llm(cwe_info, group, repo, arm, event, is_critical):
         yield chunk
 
 async def _generate_cwe_analysis_with_llm(
-    cwe_info, 
+    cwe_info: CWEWeakness, 
     group: DataFrame, 
     repo: RepoInfo | None, 
+    arm: AgentResourceManager,
     event: asyncio.Event,
     is_critical: bool = False
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
@@ -802,10 +698,16 @@ async def _generate_cwe_analysis_with_llm(
     for _, report in group.iterrows():
         context = {
             "file": report['file_path'],
-            "line": report['line_number'],
+            "line_number": f"{report['line_start']}-{report['line_end']}",
             "tool": report['tool'],
             "description": report['description'],
-            "language": report['language']
+            "language": report['language'],
+            "context": repo.reveal_content(
+                report['file_path'], 
+                report['line_start'], 
+                report['line_end'], 
+                A=3, B=3
+            ) if repo else None
         }
         issues_context.append(context)
     
@@ -824,42 +726,34 @@ Please provide:
 2. **Remediation Steps**: Specific, actionable steps to fix this vulnerability type
 3. **Prevention Tips**: Best practices to prevent this issue in the future
 
-Keep your response focused, practical, and include code examples where relevant. Use markdown formatting.
+Keep your response focused, practical, and include code examples where relevant. Use markdown formatting. No heading or intro needed.
 """
-    
-    client = openai.AsyncClient(
-        base_url=settings.llm_base_url, 
-        api_key=settings.llm_api_key
-    )
 
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": "Generate the exploitation example and remediation advice for these security findings."}
     ]
-    
-    try:
-        completion = await client.chat.completions.create(
-            model=settings.llm_model_id,
-            messages=messages,
-            stream=True
-        )
-        
-        async for chunk in completion:
-            if event.is_set():
-                break
-            if chunk.choices[0].delta.content:
-                yield wrap_chunk(random_uuid(), chunk.choices[0].delta.content, "assistant")
-                
-        yield wrap_chunk(random_uuid(), "\n---\n\n", "assistant")
-        
-    except Exception as e:
-        logger.error(f"Error generating CWE analysis: {e}")
-        
-        # Fallback content
-        yield wrap_chunk(random_uuid(), "**Remediation:** Please review the identified issues and consult security best practices for your technology stack.\n\n", "assistant")
+
+    builder = ChatCompletionResponseBuilder()
+    generator = create_streaming_response(
+        base_url=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        model=settings.llm_model_id,
+        messages=messages,
+    )
+
+    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"]):
+        if event.is_set():
+            break
+
+        if chunk.choices[0].delta.content:
+            yield chunk
+
+    yield wrap_chunk(random_uuid(), "\n---\n\n", "assistant")
 
 async def generate_security_deep_report(
     confirmed_reports: list[Report], 
+    arm: AgentResourceManager,
     event: asyncio.Event,
     repo: RepoInfo | None = None
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
@@ -868,10 +762,12 @@ async def generate_security_deep_report(
     report_list = [
         {
             "tool": report.tool,
-            "severity": str(report.severity),  # Convert enum to string
+            "severity": report.severity.value,
             "description": report.description,
             "file_path": report.file_path,
             "line_number": report.line_number,
+            "line_start": report.line_start,
+            "line_end": report.line_end,
             "language": report.language,
             "cwe": report.cwe,
             "cve": report.cve
@@ -882,22 +778,29 @@ async def generate_security_deep_report(
     df = pd.DataFrame(report_list)
     df['cwe'] = df['cwe'].apply(normalize_cwe)
 
+    df['cwe'] = df['cwe'].apply(lambda x: [cwe.strip() for cwe in x.split(',')])
+    df = df.explode('cwe').drop_duplicates()
+
     # Fix the filtering logic
     high_severity_df = df[df['severity'].isin(['CRITICAL', 'HIGH'])]
     medium_severity_df = df[df['severity'] == 'MEDIUM']
     other_df = df[~df['severity'].isin(['CRITICAL', 'HIGH', 'MEDIUM'])]
     
-    async for chunk in generate_headline(df, repo, event):
+    async for chunk in generate_headline(df, repo, arm, event):
         yield chunk
 
-    async for chunk in generate_high_severity_report(high_severity_df, repo, event):
-        yield chunk
+    if len(high_severity_df) > 0:
+        async for chunk in generate_high_severity_report(high_severity_df, repo, arm, event):
+            yield chunk
 
-    async for chunk in generate_medium_severity_report(medium_severity_df, repo, event):
-        yield chunk
+
+    if len(medium_severity_df) > 0:
+        async for chunk in generate_medium_severity_report(medium_severity_df, repo, arm, event):
+            yield chunk
         
-    async for chunk in generate_other_severity_report(other_df, repo, event):
-        yield chunk
+    if len(other_df) > 0:
+        async for chunk in generate_other_severity_report(other_df, repo, arm, event):
+            yield chunk
 
 async def generate_security_report(
     confirmed_reports: list[Report], 
@@ -908,6 +811,7 @@ async def generate_security_report(
 async def handoff(
     tool_name: str, 
     tool_args: dict[str, Any], 
+    arm: AgentResourceManager,
     event: asyncio.Event
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse | FullyHandoff, None]:
     
@@ -940,7 +844,7 @@ async def handoff(
             logger.warning(f"Error report: {report}")
 
         else:
-            report = await confirm_report(report, confirmed_reports, deep_mode, repo)
+            report: Report | None = await confirm_report(report, confirmed_reports, deep_mode, repo)
 
             if report is None:
                 logger.warning(f"Report is rejected...")
@@ -961,7 +865,7 @@ async def handoff(
     if deep_mode:
         yield FullyHandoff()
 
-        async for chunk in generate_security_deep_report(confirmed_reports, event, repo):
+        async for chunk in generate_security_deep_report(confirmed_reports, arm, event, repo):
             yield chunk
 
     else:
@@ -971,11 +875,12 @@ async def handoff(
 async def execute_toolcall_request(
     tool_name: str, 
     tool_args: dict[str, Any],
+    arm: AgentResourceManager,
     event: asyncio.Event
 ) -> list[Union[TextContent, EmbeddedResource]] | AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     for tool in await source_code_mcp._mcp_list_tools():
         if tool.name == tool_name:
-            return handoff(tool_name, tool_args, event) # async generator, no need to await
+            return handoff(tool_name, tool_args, arm, event) # async generator, no need to await
 
     return await execute_openai_compatible_toolcall(tool_name, tool_args, git_action_mcp)
 
@@ -1046,13 +951,17 @@ async def handle_request(
             _result = ""
 
             yield wrap_chunk(random_uuid(), f"<action>Running {_name}...</action>", "assistant")
-            result = await execute_toolcall_request(_name, _args, event)
+            result = await execute_toolcall_request(_name, _args, arm, event)
             
             if isinstance(result, AsyncGenerator):
                 try:
                     fully_handoff = False
 
                     async for chunk in result:
+                        if isinstance(chunk, FullyHandoff):
+                            fully_handoff = True
+                            continue
+
                         if isinstance(chunk, ErrorResponse):
                             raise Exception(chunk.message)
 

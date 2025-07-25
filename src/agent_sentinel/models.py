@@ -192,7 +192,7 @@ class Report:
             return start
 
         try:
-            e = min(int(self.line_number.split('-')[-1]), start)
+            e = max(int(self.line_number.split('-')[-1]), start)
             return e
         except ValueError:
             return start
