@@ -7,6 +7,8 @@ import hashlib
 import git
 import re
 import logging
+from typing import Union, Dict, List, Any
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -75,36 +77,76 @@ def clone_repo(repo_url: str, branch_name: str = None) -> str:
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise Exception(f"Failed to clone repository: {str(e)}")
 
+def prune_data(d: Union[Dict, List, Any], list_limit: int=10, str_len_limit: int=1024) -> Union[Dict, List, Any]:
+    if isinstance(d, list):
+        orig_length = len(d)
+        x = [
+            prune_data(item, list_limit, str_len_limit)
+            for item in d[:list_limit]
+        ]
 
-def get_directory_tree(path: str, max_depth: int = 3, current_depth: int = 0, max_items: int = 5) -> str:
-    """Compact directory tree, includes files, no indentation, low context size."""
-    if max_depth is not None and current_depth >= max_depth:
-        return ""
+        if orig_length > list_limit:
+            x.append(f"... and {orig_length - list_limit} more")
 
-    output = ""
+        return x
+
+    if isinstance(d, dict):
+        return {
+            k: prune_data(v, list_limit, str_len_limit)
+            for k, v in d.items()
+        }
+
+    if isinstance(d, str):
+        orig_length = len(d)
+        x = d[:str_len_limit]
+        
+        if orig_length > str_len_limit:
+            x += f"... and {orig_length - str_len_limit} more"
+        
+        return x
+
+    return d
+
+def _get_directory_tree(path: str) -> dict | list:
+    """Get directory tree as a nested dictionary structure."""
+    if not os.path.exists(path):
+        return {}
+
+    if not os.path.isdir(path):
+        return os.path.basename(path)
+
+    info = {}
+
     try:
-        entries = sorted(
+        for entry in sorted(
             e for e in os.listdir(path)
             if not e.startswith('.') and e not in {'__pycache__', 'node_modules', '.venv'}
-        )
-    except Exception:
-        return ""
+        ):
+            inspect = _get_directory_tree(os.path.join(path, entry))
 
-    count = 0
-    for entry in entries:
-        if count >= max_items:
-            output += f"{'/'.join(['...'] * (current_depth + 1))} ({len(entries) - max_items} more)\n"
-            break
+            if isinstance(inspect, dict): # directory
+                if 'directories' not in info:
+                    info['directories'] = []
 
-        entry_path = os.path.join(path, entry)
-        line = '/'.join([''] * current_depth + [entry])  # depth-based prefix
-        output += f"{line}\n"
-        if os.path.isdir(entry_path):
-            output += get_directory_tree(entry_path, max_depth, current_depth + 1, max_items)
-        count += 1
+                info['directories'].append(inspect)
+            else: # file
+                if 'files' not in info:
+                    info['files'] = []
 
-    return output
+                info['files'].append(inspect)
+        
+    except PermissionError:
+        logger.info(f"Permission denied for {path}")
 
+    except Exception as e:
+        logger.info(f"Error getting directory tree for {path}: {e}")
+    
+    return info
+
+
+def get_directory_tree(path: str, max_depth: int = 3, current_depth: int = 0, max_items: int = 10) -> str:
+    """Compact directory tree, includes files, no indentation, low context size."""
+    return json.dumps(prune_data(_get_directory_tree(path), list_limit=max_items), ensure_ascii=False)
 
 def git_directory_structure(repo_url: str, subfolder: str = "", max_depth: int = None, branch_name: str = None) -> str:
     """

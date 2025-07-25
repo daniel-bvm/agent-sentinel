@@ -10,10 +10,6 @@ from . import security_scanners
 from . import github_utils
 from .security_scanners import Report, ErrorReport, SeverityLevel
 
-logging.basicConfig(
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    level=logging.WARNING,
-)
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("Sentinel - Security Analysis Agent", dependencies=["gitpython"])

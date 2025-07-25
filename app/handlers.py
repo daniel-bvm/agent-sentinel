@@ -99,9 +99,10 @@ fn_mapping = {
 
 def fmt_report(report: Report, repo: RepoInfo | None = None) -> str:
     if repo and report.line_start and report.line_end:
-        return f"[{report.file_path}:({report.line_start}:{report.line_end})]({repo.get_reference(report.file_path, report.line_start, report.line_end)}) - {report.description} (CWE: {report.cwe or 'N/A'}, CVE: {report.cve or 'N/A'}, Lang: {report.language})"
+        line_info = f":{report.line_start}" if report.line_start == report.line_end else f":{report.line_start}-{report.line_end}"
+        return f"[{report.file_path}{line_info}]({repo.get_reference(report.file_path, report.line_start, report.line_end)}) - {report.description} (CWE: {report.cwe or 'N/A'}, CVE: {report.cve or 'N/A'}, Lang: {report.language})"
     else:
-        return f"{report.file_path}:{report.line_start}-{report.line_end} - {report.description} (CWE: {report.cwe or 'N/A'}, CVE: {report.cve or 'N/A'}, Lang: {report.language})"
+        return f"{report.file_path} - {report.description} (CWE: {report.cwe or 'N/A'}, CVE: {report.cve or 'N/A'}, Lang: {report.language})"
 
 def normalize_cwe(cwe: str) -> str:
     return cwe.split(':')[0].strip().upper()
@@ -313,8 +314,13 @@ async def confirm_report(report: Report, confirmed_reports: list[Report], deep_m
             return None
 
         elif tool.function.name == 'change_severity_level':
-            logger.info(f"Changing severity level of security issue finding: {args_json.get('reason', 'Unknown reason')}")
-            report = change_severity_level(report, args_json.get('severity'))
+            from_severity = report.severity.value
+            to_severity = args_json.get('severity')
+
+            if from_severity != to_severity:
+                logger.info(f"Changing severity level of security issue finding from {from_severity} to {to_severity}: {args_json.get('reason', 'Unknown reason')}")
+                report = change_severity_level(report, args_json.get('severity'))
+
             break
 
     return report
@@ -492,6 +498,7 @@ Create a professional executive summary that:
 Guidelines:
 1. Use the data preview to understand the context of the security issues
 2. Use the severity distribution to understand the risk of the security issues
+3. Keep your response practical, actionable, and focused on helping development teams efficiently address these issues. Use markdown formatting, bullet points for clarity and bold the headinngs.
 """
 
     messages = [
@@ -509,7 +516,7 @@ Guidelines:
         # tool_choice="auto"
     )
 
-    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["ref", "refs", "think"]):
+    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"], cut_pats=[r'^#+\s+']):
         if event.is_set():
             break
 
@@ -664,7 +671,7 @@ async def _generate_low_priority_recommendations(
             A=3, B=3
         ) 
         if repo else None 
-        for issue in sample_issues
+        for i, issue in sample_issues.iterrows()
     ]
 
     sample_issues = sample_issues[['file_path', 'description', 'cwe', 'tool', 'context']].to_dict('records')
@@ -709,7 +716,7 @@ Keep your response practical, actionable, and focused on helping development tea
         messages=messages,
     )
 
-    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"], cut_pats=[r'^#+']):
+    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"], cut_pats=[r'^#+\s+']):
         if event.is_set():
             break
 
@@ -751,7 +758,8 @@ async def _generate_cwe_detailed_analysis(
             break
 
         # Issue details
-        yield wrap_chunk(random_uuid(), f"**Issue {idx + 1}:** `{report['file_path']}:{report['line_start']}-{report['line_end']}`\n", "assistant")
+        line_info = f":{report['line_start']}-{report['line_end']}" if report['line_start'] and report['line_end'] else ""
+        yield wrap_chunk(random_uuid(), f"**Issue {idx + 1}:** `{report['file_path']}{line_info}`\n", "assistant")
         yield wrap_chunk(random_uuid(), f"- **Tool:** {report['tool']}\n", "assistant")
         yield wrap_chunk(random_uuid(), f"- **Severity:** {report['severity']}\n", "assistant")
         yield wrap_chunk(random_uuid(), f"- **Description:** {report['description']}\n", "assistant")
@@ -843,7 +851,7 @@ Keep your response focused, practical, and include code examples where relevant.
         messages=messages,
     )
 
-    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"], cut_pats=[r'^#+']):
+    async for chunk in arm.handle_streaming_response(wrapstream(generator, builder.add_chunk), cut=["think", "ref", "refs"], cut_pats=[r'^#+\s+']):
         if event.is_set():
             break
 

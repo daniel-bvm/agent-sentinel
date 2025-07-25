@@ -81,19 +81,27 @@ class AgentResourceManager:
 
     async def handle_streaming_response(self, stream: AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None], cut: list[str] = [], cut_pats: list[str] = []) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
         buffer: str = ''
-        
-        tags_str = "|".join(["file|img|data", *cut])
+
         cut_tags_str = "|".join(cut)
+        tags_str = "file|img|data"
 
-        citing_pat = regex.compile(
-            r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>{cut_pats}".format(tags_str=tags_str, cut_pats="|" + "|".join(cut_pats)), 
-            regex.DOTALL | regex.IGNORECASE | regex.MULTILINE
-        )
+        pattern_template = r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>"
 
-        cut_pat = regex.compile(
-            r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>{cut_pats}".format(tags_str=cut_tags_str, cut_pats="|" + "|".join(cut_pats)), 
-            regex.DOTALL | regex.IGNORECASE | regex.MULTILINE
-        )
+        citing_pat_str = pattern_template.format(tags_str=tags_str)
+        cut_pat_str = pattern_template.format(tags_str=cut_tags_str) if cut_pats else ""
+
+        if cut_pat_str:
+            cut_pats.append(cut_pat_str)
+
+        if cut_pats:
+            citing_pat = regex.compile("|".join([citing_pat_str, *cut_pats]), regex.DOTALL | regex.IGNORECASE)
+        else:
+            citing_pat = regex.compile(citing_pat_str, regex.DOTALL | regex.IGNORECASE)
+
+        cut_pat = regex.compile("|".join(cut_pats), regex.DOTALL | regex.IGNORECASE) if cut_pats else None
+
+        logger.info("Watching for citing_pat: {}".format(citing_pat))
+        logger.info("Watching for cut_pat: {}".format(cut_pat))
 
         async for chunk in stream:
             if isinstance(chunk, ErrorResponse):
@@ -115,7 +123,7 @@ class AgentResourceManager:
 
                 continue
 
-            if cut_pat.match(buffer) is None:
+            if cut_pat is not None and cut_pat.search(buffer) is None:
                 yield wrap_chunk(random_uuid(), self.reveal_resource(buffer), 'assistant')
 
             buffer = ''
