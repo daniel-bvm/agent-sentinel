@@ -205,8 +205,15 @@ class RepoInfo:
     def __str__(self) -> str:
         return f"RepoInfo(repo_url={self.repo_url}, branch={self.branch})"
 
-    def get_reference(self, file: str, line_start: str | int, line_end: str | int) -> str:
-        return f"{self.repo_url}/blob/{self.branch}/{file}#L{line_start}-L{line_end}"
+    def get_reference(self, file: str, line_start: str | int | None = None, line_end: str | int | None = None) -> str:
+        if line_start is not None and line_end is None:
+            return f"{self.repo_url}/blob/{self.branch}/{file}#L{line_start}"
+
+        elif line_start is not None and line_end is not None:
+            return f"{self.repo_url}/blob/{self.branch}/{file}#L{line_start}-L{line_end}" if line_start != line_end else f"{self.repo_url}/blob/{self.branch}/{file}#L{line_start}"
+
+        else:
+            return f"{self.repo_url}/blob/{self.branch}/{file}"
     
     def reveal_content(self, file: str, line_start: str | int, line_end: str | int, A: int = 0, B: int = 0) -> str | None:
         if isinstance(line_start, str) and line_start.isdigit():

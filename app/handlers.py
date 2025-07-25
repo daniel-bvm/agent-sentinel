@@ -785,9 +785,12 @@ async def _generate_cwe_detailed_analysis(
             yield wrap_chunk(random_uuid(), f"*... and {len(group) - idx} more issues*\n\n", "assistant")
             break
 
+        line_start = report['line_start'] or None
+        line_end = report['line_end'] or None
+
         # Issue details
-        line_info = f":{report['line_start']}-{report['line_end']}" if report['line_start'] and report['line_end'] and report['line_start'] != report['line_end'] else (
-            "" if not report['line_number'] else f":{report['line_start']}"
+        line_info = f":{line_start}-{line_end}" if line_start and line_end and line_start != line_end else (
+            "" if not report['line_number'] else f":{line_start}"
         )
 
         github_link = repo.get_reference(report['file_path'], line_start, line_end)
@@ -799,8 +802,6 @@ async def _generate_cwe_detailed_analysis(
         # Show source code context if available
         if repo and report['file_path'] and report['line_number']:
             try:
-                line_start = report['line_start']
-                line_end = report['line_end']
 
                 if line_start and line_end:
                     context = repo.reveal_content(report['file_path'], line_start, line_end, A=3, B=3)
