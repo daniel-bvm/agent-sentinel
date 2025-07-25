@@ -85,22 +85,19 @@ class AgentResourceManager:
         cut_tags_str = "|".join(cut)
         tags_str = "file|img|data"
 
-        pattern_template = r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>{cut_pats}"
+        pattern_template = r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>"
 
-        citing_pat_str = pattern_template.format(
-            tags_str=tags_str, 
-            cut_pats=""
-        )
-
-        cut_pat_str = pattern_template.format(
-            tags_str=cut_tags_str, 
-            cut_pats="|" + "|".join(cut_pats) if cut_pats else ""
-        ) if cut_pats else ""
+        citing_pat_str = pattern_template.format(tags_str=tags_str)
+        cut_pat_str = pattern_template.format(tags_str=cut_tags_str) if cut_pats else ""
 
         if cut_pat_str:
             cut_pats.append(cut_pat_str)
 
-        citing_pat = regex.compile("|".join([citing_pat_str, cut_pat_str]), regex.DOTALL | regex.IGNORECASE)
+        if cut_pats:
+            citing_pat = regex.compile("|".join([citing_pat_str, *cut_pats]), regex.DOTALL | regex.IGNORECASE)
+        else:
+            citing_pat = regex.compile(citing_pat_str, regex.DOTALL | regex.IGNORECASE)
+
         cut_pat = regex.compile("|".join(cut_pats), regex.DOTALL | regex.IGNORECASE) if cut_pats else None
 
         logger.info("Watching for citing_pat: {}".format(citing_pat))
