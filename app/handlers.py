@@ -59,7 +59,7 @@ async def get_system_prompt(messages: list[ChatCompletionMessageParam] | list[di
                 attach_repo_info = True
                 continue
 
-            _repo: RepoInfo = RepoInfo(path)
+            _repo: RepoInfo = RepoInfo(path, "")
 
             repo_info_str += f"Repo: {_repo.repo_url}\n"
             repo_info_str += f"Default Branch: {_repo.branch}\n"
@@ -978,11 +978,12 @@ async def handoff(
     confirmed_reports = []
     deep_mode = tool_args.get('deep', True)
     repo_url = tool_args.get('repo_url', None)
+    target_path = tool_args.get('target_path', "")
 
     repo = None
 
     if repo_url is not None:
-        repo = RepoInfo(clone_repo(repo_url, tool_args.get('branch', None)))
+        repo = RepoInfo(clone_repo(repo_url, tool_args.get('branch', None)), target_path)
 
     if not repo:
         yield wrap_chunk(random_uuid(), f"Repository is invalid or not accessible. No security scan is performed.", "assistant")

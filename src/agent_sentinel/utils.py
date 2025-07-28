@@ -57,38 +57,56 @@ def run_command(cmd: list[str], cwd: str = None) -> dict[str, Any]:
         }
 
 
-def detect_project_languages(repo_path: str) -> list[str]:
-    """Detect programming languages used in the repository."""
+def detect_language_from_file(file_path: str) -> str | None:
+    """Detect programming language from a single file path."""
+    filename = os.path.basename(file_path)
+
+    if filename.endswith(('.py', '.pyx')):
+        return 'python'
+    elif filename.endswith(('.js', '.jsx', '.ts', '.tsx')):
+        return 'javascript'
+    elif filename.endswith(('.java', '.kt', '.scala')):
+        return 'java'
+    elif filename.endswith(('.c', '.cpp', '.cc', '.cxx', '.h', '.hpp')):
+        return 'cpp'
+    elif filename.endswith(('.cs', '.vb')):
+        return 'csharp'
+    elif filename.endswith(('.rb', '.erb')):
+        return 'ruby'
+    elif filename.endswith('.go'):
+        return 'go'
+    elif filename.endswith(('.php', '.phtml')):
+        return 'php'
+    elif filename.endswith('.swift'):
+        return 'swift'
+    elif filename.endswith('.rs'):
+        return 'rust'
+    elif filename.endswith('.sol'):
+        return 'solidity'
+    else:
+        return None
+
+
+def detect_project_languages(path: str) -> list[str]:
+    """Detect programming languages used in the repository or single file."""
     languages = []
 
-    # Check for common file extensions
-    for root, dirs, files in os.walk(repo_path):
+    # Check if path is a file or directory
+    if os.path.isfile(path):
+        # Single file detection
+        language = detect_language_from_file(path)
+        if language:
+            languages.append(language)
+    else:
+        # Directory detection (original logic)
+        for root, dirs, files in os.walk(path):
         # Skip hidden directories and git directories
-        dirs[:] = [d for d in dirs if not d.startswith('.')]
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
 
         for file in files:
-            if file.endswith(('.py', '.pyx')):
-                languages.append('python')
-            elif file.endswith(('.js', '.jsx', '.ts', '.tsx')):
-                languages.append('javascript')
-            elif file.endswith(('.java', '.kt', '.scala')):
-                languages.append('java')
-            elif file.endswith(('.c', '.cpp', '.cc', '.cxx', '.h', '.hpp')):
-                languages.append('cpp')
-            elif file.endswith(('.cs', '.vb')):
-                languages.append('csharp')
-            elif file.endswith(('.rb', '.erb')):
-                languages.append('ruby')
-            elif file.endswith(('.go')):
-                languages.append('go')
-            elif file.endswith(('.php', '.phtml')):
-                languages.append('php')
-            elif file.endswith(('.swift')):
-                languages.append('swift')
-            elif file.endswith(('.rs')):
-                languages.append('rust')
-            elif file.endswith('.sol'):
-                languages.append('solidity')
+                language = detect_language_from_file(file)
+                if language:
+                    languages.append(language)
 
     return list(set(languages))
 

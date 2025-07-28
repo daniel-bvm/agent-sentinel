@@ -167,13 +167,13 @@ def _convert_npm_audit_to_reports(npm_result: dict[str, Any]) -> list[Report]:
         ))
     return reports
 
-async def comprehensive_security_scan_concurrent(repo_url: str, subfolder: str = "", branch_name: str = None, deep: bool = True) -> AsyncGenerator[Report | ErrorReport, None]:
+async def comprehensive_security_scan_concurrent(repo_url: str, target_path: str = "", branch_name: str = None, deep: bool = True) -> AsyncGenerator[Report | ErrorReport, None]:
     """
     Perform a comprehensive security scan of a GitHub repository concurrently.
 
     Args:
         repo_url: The URL of the Git repository to scan
-        subfolder: Optional path to a specific subfolder within the repository
+        target_path: Optional path to a specific subfolder or file within the repository
         branch_name: Optional branch name to checkout before scanning
 
     Yields:
@@ -181,7 +181,17 @@ async def comprehensive_security_scan_concurrent(repo_url: str, subfolder: str =
     """
     # Clone the repository and checkout branch if specified
     repo_path = await sync2async(clone_repo)(repo_url, branch_name)
-    scan_path = os.path.join(repo_path, subfolder) if subfolder else repo_path
+    scan_path = os.path.join(repo_path, target_path) if target_path else repo_path
+
+    # Check if scan_path is a file or directory and set up appropriate paths
+    is_single_file = os.path.isfile(scan_path)
+    if is_single_file:
+        # For single file scanning, we need the parent directory for some tools
+        scan_dir = os.path.dirname(scan_path)
+        target_file = scan_path
+    else:
+        scan_dir = scan_path
+        target_file = None
 
     # Detect languages
     languages = await sync2async(detect_project_languages)(scan_path)
@@ -196,23 +206,28 @@ async def comprehensive_security_scan_concurrent(repo_url: str, subfolder: str =
             # Check if Mythril is available first
             mythril_check = await sync2async(run_command)(["which", "myth"])
             if mythril_check["success"]:
+                # Mythril can handle individual files
                 tasks.append(a_stupid_wrapper("mythril", sync2async(scan_solidity_mythril)(scan_path)))
             else:
                 logger.warning("Mythril not available for deep analysis, falling back to Slither")
-                tasks.append(a_stupid_wrapper("slither", sync2async(scan_solidity_slither)(scan_path)))
+                # Slither needs directory
+                slither_path = scan_dir if is_single_file else scan_path
+                tasks.append(a_stupid_wrapper("slither", sync2async(scan_solidity_slither)(slither_path)))
         else:
-            # Use Slither for faster analysis when deep=False
-            tasks.append(a_stupid_wrapper("slither", sync2async(scan_solidity_slither)(scan_path)))
+            # Use Slither for faster analysis when deep=False - Slither needs directory
+            slither_path = scan_dir if is_single_file else scan_path
+            tasks.append(a_stupid_wrapper("slither", sync2async(scan_solidity_slither)(slither_path)))
 
-    # Schedule general security scans
+    # Schedule general security scans (these can handle files directly)
     tasks.append(a_stupid_wrapper("secrets", sync2async(scan_secrets_with_gitleaks)(scan_path)))
     tasks.append(a_stupid_wrapper("semgrep", sync2async(scan_semgrep)(scan_path)))
 
-    # Schedule CodeQL analysis for each language
+    # Schedule CodeQL analysis for each language (CodeQL needs directory)
     for language in languages:
-        tasks.append(a_stupid_wrapper(f"codeql_{language}", sync2async(run_codeql_scanner)(scan_path, language)))
+        codeql_path = scan_dir if is_single_file else scan_path
+        tasks.append(a_stupid_wrapper(f"codeql_{language}", sync2async(run_codeql_scanner)(codeql_path, language)))
 
-    # Schedule Trivy scan
+    # Schedule Trivy scan (can handle files directly)
     tasks.append(a_stupid_wrapper("trivy", sync2async(scan_with_trivy)(scan_path)))
 
     # Process completed tasks as they finish
@@ -233,6 +248,7 @@ async def comprehensive_security_scan_concurrent(repo_url: str, subfolder: str =
                 else:
                     reports = post_processor(result)
                     for report in reports:
+                        logger.info(f"Report file path: {report.file_path}")
                         yield report
             except Exception as e:
                 logger.error(f"Error processing {identity} results: {e}")
@@ -316,8 +332,15 @@ def scan_solidity_slither(scan_path: str) -> dict[str, Any]:
 
 
 def scan_secrets_with_gitleaks(scan_path: str) -> dict[str, Any]:
-    """Run Gitleaks for secret detection in a given path (repo or subfolder)."""
-    output_path = os.path.join(scan_path, "gitleaks_report.json")
+    """Run Gitleaks for secret detection in a given path (repo, subfolder, or file)."""
+    # Determine working directory and output path
+    if os.path.isfile(scan_path):
+        work_dir = os.path.dirname(scan_path)
+        output_path = os.path.join(work_dir, "gitleaks_report.json")
+    else:
+        work_dir = scan_path
+        output_path = os.path.join(scan_path, "gitleaks_report.json")
+
     if os.path.exists(output_path):
         os.remove(output_path)
     cmd = [
@@ -331,7 +354,7 @@ def scan_secrets_with_gitleaks(scan_path: str) -> dict[str, Any]:
         "--report-path",
         output_path,
     ]
-    run_command(cmd, cwd=scan_path)
+    run_command(cmd, cwd=work_dir)
 
     if not os.path.exists(output_path):
         return {"error": "Gitleaks did not generate output file."}
@@ -353,9 +376,11 @@ def scan_secrets_with_gitleaks(scan_path: str) -> dict[str, Any]:
 
 
 def scan_semgrep(scan_path: str) -> dict[str, Any]:
-    """Run Semgrep for multi-language security analysis in a given path (repo or subfolder)."""
+    """Run Semgrep for multi-language security analysis in a given path (repo, subfolder, or file)."""
     cmd = ["semgrep", "--config=auto", "--json", scan_path]
-    result = run_command(cmd, cwd=scan_path)
+    # Determine working directory
+    work_dir = os.path.dirname(scan_path) if os.path.isfile(scan_path) else scan_path
+    result = run_command(cmd, cwd=work_dir)
 
     if result["success"]:
         try:

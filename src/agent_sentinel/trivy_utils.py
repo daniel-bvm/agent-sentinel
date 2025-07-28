@@ -41,11 +41,15 @@ def _extract_dependency_information(vulnerability: dict) -> str | None:
 
 def _run_trivy_scan(scan_path: str) -> str | None:
     """Run Trivy scan and return the report."""
-    result_path = f"{scan_path}/trivy-report.json"
+    # Determine output path based on whether scan_path is a file or directory
+    if os.path.isfile(scan_path):
+        result_path = f"{os.path.dirname(scan_path)}/trivy-report.json"
+    else:
+        result_path = f"{scan_path}/trivy-report.json"
     command = f"trivy fs --format json -o {result_path} {scan_path}"
-    logger.debug(f"Running Trivy scan with command: {command}")
+    logger.info(f"Running Trivy scan with command: {command}")
     result = subprocess.run(command, shell=True, capture_output=True, text=True)
-    logger.debug(f"Trivy scan result: {result.stdout}")
+    logger.info(f"Trivy scan result: {result.stdout}")
     if not os.path.exists(result_path):
         raise FileNotFoundError("Error running Trivy scan")
     return result_path
@@ -58,7 +62,7 @@ def _parse_trivy_report(report_path: str) -> list[Report]:
 
     reports = []
 
-    for result in data["Results"]:
+    for result in data.get("Results", []):
         file_name = result["Target"]
 
         # Process vulnerabilities

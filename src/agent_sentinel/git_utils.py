@@ -99,10 +99,10 @@ def prune_data(d: Union[Dict, List, Any], list_limit: int=10, str_len_limit: int
     if isinstance(d, str):
         orig_length = len(d)
         x = d[:str_len_limit]
-        
+
         if orig_length > str_len_limit:
             x += f"... and {orig_length - str_len_limit} more"
-        
+
         return x
 
     return d
@@ -134,13 +134,13 @@ def _get_directory_tree(path: str) -> dict | list:
                     info['files'] = []
 
                 info['files'].append(inspect)
-        
+
     except PermissionError:
         logger.info(f"Permission denied for {path}")
 
     except Exception as e:
         logger.info(f"Error getting directory tree for {path}: {e}")
-    
+
     return info
 
 
@@ -195,15 +195,26 @@ def git_directory_structure(repo_url: str, subfolder: str = "", max_depth: int =
 class RepoInfo:
     DEFAULT_REMOTE_NAME = 'origin'
 
-    def __init__(self, repo_path: str):
+    def __init__(self, repo_path: str, target_path: str = ""):
         self.repo_path = repo_path
+        self.target_path = target_path
         self.repo = git.Repo(repo_path)
         self.branch = re.sub(rf'^(remotes/)?{self.DEFAULT_REMOTE_NAME}/', '', self.repo.active_branch.name)
         self.repo_url = re.sub(r'\.git$', '', self.repo.remote(self.DEFAULT_REMOTE_NAME).url).strip("/")
-    
+
+        # Determine scan context
+        if target_path:
+            full_target_path = os.path.join(repo_path, target_path)
+            self.is_single_file = os.path.isfile(full_target_path)
+            self.scan_target = target_path  # Relative path within repo
+        else:
+            self.is_single_file = False
+            self.scan_target = ""
 
     def __str__(self) -> str:
-        return f"RepoInfo(repo_url={self.repo_url}, branch={self.branch})"
+        context = f", target={self.scan_target}" if self.scan_target else ""
+        file_type = " (file)" if self.is_single_file else " (directory)" if self.scan_target else ""
+        return f"RepoInfo(repo_url={self.repo_url}, branch={self.branch}{context}{file_type})"
 
     def get_reference(self, file: str, line_start: str | int | None = None, line_end: str | int | None = None) -> str:
         if line_start is not None and line_end is None:
@@ -214,7 +225,7 @@ class RepoInfo:
 
         else:
             return f"{self.repo_url}/blob/{self.branch}/{file}"
-    
+
     def reveal_content(self, file: str, line_start: str | int, line_end: str | int, A: int = 0, B: int = 0) -> str | None:
         if isinstance(line_start, str) and line_start.isdigit():
             line_start = int(line_start)
@@ -229,11 +240,59 @@ class RepoInfo:
         line_start -= A
         line_end += B
 
-        if not os.path.exists(os.path.join(self.repo_path, file)):
+        file_path = (
+            os.path.join(self.repo_path, self.target_path, file)
+            if self.target_path
+            else os.path.join(self.repo_path, file)
+        )
+
+        if self.is_single_file:
+            file_path = os.path.join(self.repo_path, self.scan_target)
+
+        logger.info(f"Revealing content of {file_path} from line {line_start} to {line_end}")
+
+        if not os.path.exists(file_path):
             logger.warning(f"File {file} does not exist in the repository")
             return None
 
-        with open(os.path.join(self.repo_path, file), 'r') as f:
+        with open(file_path, 'r') as f:
             lines = f.readlines()
 
         return ''.join(lines[line_start:line_end])
+
+    def is_file_in_scan_target(self, file_path: str) -> bool:
+        """Check if a file is within the scan target scope."""
+        if not self.scan_target:
+            # No specific target, so all files are in scope
+            return True
+
+        if self.is_single_file:
+            # Scanning a single file, check if this is that file
+            return file_path == self.scan_target or file_path.endswith(self.scan_target)
+        else:
+            # Scanning a directory, check if file is within that directory
+            return file_path.startswith(self.scan_target)
+
+    def get_scan_context(self) -> str:
+        """Get a human-readable description of what is being scanned."""
+        if not self.scan_target:
+            return "entire repository"
+        elif self.is_single_file:
+            return f"file '{self.scan_target}'"
+        else:
+            return f"directory '{self.scan_target}'"
+
+    def get_relative_path(self, file_path: str) -> str:
+        """Get the file path relative to the scan target."""
+        if not self.scan_target:
+            return file_path
+
+        if self.is_single_file:
+            # For single file, return just the filename
+            return os.path.basename(file_path)
+        else:
+            # For directory, return path relative to target directory
+            if file_path.startswith(self.scan_target):
+                relative = file_path[len(self.scan_target):].lstrip('/')
+                return relative if relative else os.path.basename(self.scan_target)
+            return file_path
