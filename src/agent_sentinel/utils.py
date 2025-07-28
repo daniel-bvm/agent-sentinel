@@ -132,7 +132,7 @@ def transform_cwe(cwe: str) -> str:
 
     return split[0]
 
-def generate_compact_report(df: pd.DataFrame) -> str:   
+def generate_compact_report(df: pd.DataFrame) -> str:
     orig_cwe = df['cwe'].copy(deep=True)
     df['cwe'] = df['cwe'].apply(transform_cwe)
 
@@ -140,28 +140,28 @@ def generate_compact_report(df: pd.DataFrame) -> str:
 
     compact_report += '\n\nStat by serverities:\n'
     compact_report += df['severity'].value_counts().to_json()
-    
+
     compact_report += '\n\nStat by CWE:\n'
     compact_report += df['cwe'].value_counts().to_json()
 
     compact_report += "\n\n## Report by tool\n"
     visible_columns = ['severity', 'file_path', 'line_number', 'language', 'cwe', 'description']
     it = 0
-    
+
     for tool in df['tool'].unique():
         df_tool = df[df['tool'] == tool].reset_index(drop=True)
         n_total = len(df_tool)
-        
+
         if n_total == 0:
             continue
-            
+
         it += 1
         compact_report += f'{it}. Tool: {tool}\n'
         compact_report += df_tool['severity'].value_counts().to_json()
         compact_report += '\n'
 
         h5 = df_tool[visible_columns].head(5)
-        compact_report += h5[visible_columns[:-1]].reset_index().to_json(orient='records') 
+        compact_report += h5[visible_columns[:-1]].reset_index().to_json(orient='records')
 
         if n_total > 5:
             compact_report += f'\n (and {n_total - 5} more)\n'
@@ -175,7 +175,7 @@ def generate_compact_report(df: pd.DataFrame) -> str:
     for cwe in df['cwe'].unique():
         df_cwe = df[df['cwe'] == cwe].reset_index(drop=True)
         n_total = len(df_cwe)
-        
+
         if n_total == 0:
             continue
 
@@ -205,11 +205,11 @@ def deduplicate_reports(reports: list[Report]) -> list[Report]:
 def merge_reports(reports: list[Report | ErrorReport]) -> str:
     """Merge reports into a single string."""
     valid_reports: list[Report] = [
-        report for report in reports if 
+        report for report in reports if
         not isinstance(report, ErrorReport)
-        and report.severity != SeverityLevel.ERROR 
-        and report.description != "" 
-        and report.description != "n/a" 
+        and report.severity != SeverityLevel.ERROR
+        and report.description != ""
+        and report.description != "n/a"
         and report.file_path != ""
         and report.line_number != ""
         and report.description is not None
@@ -228,9 +228,10 @@ def merge_reports(reports: list[Report | ErrorReport]) -> str:
         "line_number": report.line_number,
         "language": report.language,
         "cwe": report.cwe,
-        "cve": report.cve
+        "cve": report.cve,
+        "information": report.information,
+        "processed_information": report.processed_information
     } for report in valid_reports]
 
     df = pd.DataFrame(report_list)
     return generate_compact_report(df)
-    

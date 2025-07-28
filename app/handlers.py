@@ -850,6 +850,8 @@ async def _generate_cwe_analysis_with_llm(
             "tool": report['tool'],
             "description": report['description'],
             "language": report['language'],
+            "information": report.get('information'),
+            "processed_information": report.get('processed_information'),
             "context": repo.reveal_content(
                 report['file_path'],
                 report['line_start'],
@@ -921,7 +923,9 @@ async def generate_security_deep_report(
             "line_end": report.line_end,
             "language": report.language,
             "cwe": report.cwe,
-            "cve": report.cve
+            "cve": report.cve,
+            "information": report.information,
+            "processed_information": report.processed_information
         }
         for report in confirmed_reports
     ]

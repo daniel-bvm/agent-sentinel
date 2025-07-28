@@ -75,7 +75,9 @@ def _convert_bandit_to_reports(bandit_result: dict[str, Any]) -> list[Report]:
                         file_path=issue.get("filename"),
                         line_number=str(issue.get("line_number", "")),
                         language="python",
-                        cwe=cwe
+                        cwe=cwe,
+                        information=test_id,  # Add test ID as information
+                        report_type="code"
                     ))
     elif isinstance(bandit_result, dict) and "error" in bandit_result:
         reports.append(ErrorReport(
@@ -107,7 +109,9 @@ def _convert_safety_to_reports(safety_result: dict[str, Any]) -> list[Report]:
                                     description=f"{package}: {vuln.get('advisory', 'N/A')}{cve_info}",
                                     file_path=req_file,
                                     language="python",
-                                    cwe=vuln.get('cwe', 'N/A')
+                                    cwe=vuln.get('cwe', 'N/A'),
+                                    information=f"{package}:{vuln.get('affected_versions', 'N/A')}",  # Add package information
+                                    report_type="dependency"
                                 ))
             elif isinstance(file_results, dict) and "error" in file_results:
                 reports.append(ErrorReport(
@@ -152,7 +156,9 @@ def _convert_npm_audit_to_reports(npm_result: dict[str, Any]) -> list[Report]:
                             description=enhanced_description,
                             file_path="package.json",  # npm audit always relates to package.json
                             language="javascript",
-                            cwe=vuln.get('cwe', 'n/a')
+                            cwe=vuln.get('cwe', 'n/a'),
+                            information=f"{package}:{vuln.get('patched_in', 'N/A')}",  # Add package version information
+                            report_type="dependency"
                         ))
     else:
         reports.append(ErrorReport(
@@ -449,7 +455,9 @@ def _parse_slither_result(slither_result: dict[str, Any]) -> list[Report]:
             file_path=file_path,
             line_number=line_number,
             language="solidity",
-            cwe=cwe_info["cwe"]
+            cwe=cwe_info["cwe"],
+            information=check_name,  # Add check name as information
+            report_type="code"
         ))
 
     # Process compilation warnings/errors if present
@@ -464,7 +472,9 @@ def _parse_slither_result(slither_result: dict[str, Any]) -> list[Report]:
                 severity=SeverityLevel.WARNING,
                 description=f"Compilation {error_type}: {message}",
                 language="solidity",
-                cwe="CWE-1100"  # Insufficient Isolation or Compartmentalization
+                cwe="CWE-1100",  # Insufficient Isolation or Compartmentalization
+                information=error_type,  # Add error type as information
+                report_type="code"
             ))
 
     return all_reports
@@ -757,7 +767,9 @@ def _parse_mythril_result(mythril_result: dict[str, Any]) -> list[Report]:
                 file_path=file_path,
                 line_number=line_number,
                 language="solidity",
-                cwe=cwe
+                cwe=cwe,
+                information=swc_id,  # Add SWC ID as information
+                report_type="code"
             ))
 
     logger.info(f"Mythril parsing completed: generated {len(all_reports)} reports")
@@ -832,7 +844,9 @@ def _parse_codeql_result(codeql_result: str | list[Report], language: str) -> li
                     description=current_description,
                     file_path=file_path,
                     language=language,
-                    cwe="CWE-703"  # Default CWE
+                    cwe="CWE-703",  # Default CWE
+                    information=current_description,  # Add description as information for code issues
+                    report_type="code"
                 )
 
         elif line.startswith("Level:") and current_issue:
@@ -965,7 +979,9 @@ def _convert_trivy_results_to_reports(trivy_result: tuple[str, Any]) -> list[Rep
                 severity=severity,
                 description=description,
                 file_path=file_path,
-                cwe=cwe
+                cwe=cwe,
+                information=f"{package_name}:{version}" if package_match else None,  # Add package information
+                report_type="dependency" if package_match else "code"
             ))
 
         # Track current file context
@@ -1083,6 +1099,9 @@ def _parse_scan_results_to_reports(scan_results: dict[str, Any]) -> list[Report]
             }
             language = lang_mapping.get(ext, 'code')
 
+        # Get rule ID
+        rule_id = metadata.get("rule_id", "unknown_rule")
+
         reports.append(Report(
             tool="Semgrep",
             severity=severity,
@@ -1090,7 +1109,9 @@ def _parse_scan_results_to_reports(scan_results: dict[str, Any]) -> list[Report]
             file_path=file_path,
             line_number=line_number,
             language=language,
-            cwe=cwe
+            cwe=cwe,
+            information=rule_id,  # Add rule ID as information
+            report_type="code"
         ))
 
     return reports
@@ -1195,7 +1216,9 @@ def _convert_secrets_to_reports(secrets_result) -> list[Report]:
             description=enhanced_description,
             file_path=cleaned_file_path,
             line_number=line_number,
-            cwe=cwe
+            cwe=cwe,
+            information=secret_type,  # Add secret type as information
+            report_type="secret"
         ))
 
     return reports

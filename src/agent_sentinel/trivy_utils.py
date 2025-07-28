@@ -5,6 +5,8 @@ import subprocess
 import os
 
 from .models import Report, SeverityLevel, ErrorReport
+import tempfile
+
 logger = logging.getLogger(__name__)
 
 # Mapping Trivy severity to SeverityLevel enum
@@ -15,6 +17,27 @@ SEVERITY_MAPPING = {
     "LOW": SeverityLevel.LOW,
     "UNKNOWN": SeverityLevel.LOW
 }
+
+def _extract_dependency_information(vulnerability: dict) -> str | None:
+    """
+    Extract package:version information from vulnerability data.
+
+    Args:
+        vulnerability: Vulnerability dictionary from Trivy results
+
+    Returns:
+        Package:version string or None if not extractable
+    """
+    pkg_name = vulnerability.get("PkgName", "")
+    installed_version = vulnerability.get("InstalledVersion", "")
+
+    if pkg_name and installed_version:
+        return f"{pkg_name}:{installed_version}"
+    elif pkg_name:
+        return pkg_name
+
+    return None
+
 
 def _run_trivy_scan(scan_path: str) -> str | None:
     """Run Trivy scan and return the report."""
@@ -118,7 +141,9 @@ def _parse_trivy_report(report_path: str) -> list[Report]:
                 line_number=None,  # Trivy typically doesn't provide line numbers
                 language=language,
                 cwe=cwe,
-                cve=vuln_id
+                cve=vuln_id,
+                information=_extract_dependency_information(vuln),  # Add dependency information
+                report_type="dependency" if language == "dependency" else "code"
             )
 
             reports.append(report)
@@ -138,10 +163,17 @@ def _parse_trivy_report(report_path: str) -> list[Report]:
             if rule_id:
                 description_parts.append(f"Rule: {rule_id}")
 
+            # Extract secret value for information field (masked appropriately)
+            secret_value = None
             match = secret.get("Match", "")
-            if match and len(match) > 10:
-                # Mask the secret for security
-                masked_match = match[:4] + "*" * (len(match) - 8) + match[-4:] if len(match) > 8 else "*" * len(match)
+            if match:
+                # Mask the secret for security but keep it in information field
+                if len(match) > 8:
+                    secret_value = match[:4] + "*" * (len(match) - 8) + match[-4:]
+                    masked_match = secret_value  # Use the same masked version for description
+                else:
+                    secret_value = "*" * len(match)
+                    masked_match = secret_value
                 description_parts.append(f"Pattern: {masked_match}")
 
             # Get line information
@@ -164,7 +196,9 @@ def _parse_trivy_report(report_path: str) -> list[Report]:
                 file_path=file_name if file_name else None,
                 line_number=line_number,
                 language="code",
-                cwe=cwe
+                cwe=cwe,
+                information=secret_value,  # Add secret information
+                report_type="secret"
             )
 
             reports.append(report)

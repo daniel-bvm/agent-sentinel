@@ -122,7 +122,7 @@ class Report:
             language: Language of the code being scanned
             cwe: Common Weakness Enumeration identifier (default: "n/a")
             cve: CVE identifier if available
-            information: Additional processed information based on report type
+            information: Additional processed information based on report type (now populated directly)
             report_type: Type of report (e.g., 'secret', 'credentials', 'code', 'dependency')
         """
         self.tool = tool
@@ -147,6 +147,120 @@ class Report:
         self.cve = cve
         self.information = information
         self.report_type = report_type or language
+
+    @staticmethod
+    def create_dependency_report(
+        tool: str,
+        severity: str | SeverityLevel,
+        description: str,
+        package_name: str,
+        version: str | None = None,
+        file_path: str | None = None,
+        cwe: str | None = None,
+        cve: str | None = None
+    ) -> 'Report':
+        """
+        Helper method to create a dependency vulnerability report.
+
+        Args:
+            tool: Security tool name
+            severity: Severity level
+            description: Description of the vulnerability
+            package_name: Name of the vulnerable package
+            version: Version of the package (optional)
+            file_path: Path to dependency file
+            cwe: CWE identifier
+            cve: CVE identifier
+
+        Returns:
+            Report object with properly populated information field
+        """
+        information = f"{package_name}:{version}" if version else package_name
+        return Report(
+            tool=tool,
+            severity=severity,
+            description=description,
+            file_path=file_path,
+            cwe=cwe,
+            cve=cve,
+            information=information,
+            report_type="dependency"
+        )
+
+    @staticmethod
+    def create_secret_report(
+        tool: str,
+        severity: str | SeverityLevel,
+        description: str,
+        secret_value: str,
+        file_path: str | None = None,
+        line_number: str | None = None,
+        cwe: str | None = None
+    ) -> 'Report':
+        """
+        Helper method to create a secret detection report.
+
+        Args:
+            tool: Security tool name
+            severity: Severity level
+            description: Description of the secret
+            secret_value: The secret value (should be pre-masked for security)
+            file_path: Path to file containing secret
+            line_number: Line number where secret was found
+            cwe: CWE identifier
+
+        Returns:
+            Report object with properly populated information field
+        """
+        return Report(
+            tool=tool,
+            severity=severity,
+            description=description,
+            file_path=file_path,
+            line_number=line_number,
+            cwe=cwe or "CWE-798",  # Default to Hard-coded Credentials
+            information=secret_value,
+            report_type="secret"
+        )
+
+    @staticmethod
+    def create_code_report(
+        tool: str,
+        severity: str | SeverityLevel,
+        description: str,
+        rule_id: str | None = None,
+        file_path: str | None = None,
+        line_number: str | None = None,
+        language: str = "code",
+        cwe: str | None = None
+    ) -> 'Report':
+        """
+        Helper method to create a code analysis report.
+
+        Args:
+            tool: Security tool name
+            severity: Severity level
+            description: Description of the code issue
+            rule_id: Rule or check identifier
+            file_path: Path to file with issue
+            line_number: Line number where issue was found
+            language: Programming language
+            cwe: CWE identifier
+
+        Returns:
+            Report object with properly populated information field
+        """
+        return Report(
+            tool=tool,
+            severity=severity,
+            description=description,
+            file_path=file_path,
+            line_number=line_number,
+            language=language,
+            cwe=cwe,
+            information=rule_id,
+            report_type="code"
+        )
 
     def __str__(self) -> str:
         """String representation of the report."""
@@ -212,12 +326,20 @@ class Report:
         """
         Process and return information based on the report type.
 
+        Now that the information field is populated directly during Report creation,
+        this method primarily returns the information field as-is, with fallback
+        parsing for legacy reports that don't have the information field populated.
+
         Returns:
-            For 'dependency': package:version format
-            For 'secret': the secret value
-            For 'credentials'/'code': the information field as-is
-            For other report types: None
+            For reports with information field populated: returns information as-is
+            For legacy reports without information: attempts to parse from description
+            For unknown report types: None
         """
+        # If information field is already populated, return it directly
+        if self.information:
+            return self.information
+
+        # Fallback to parsing from description for legacy reports
         if not self.report_type or self.report_type.lower() not in ['secret', 'credentials', 'code', 'dependency']:
             return None
 
@@ -242,18 +364,21 @@ class Report:
             elif package_match:
                 return package_match.group(1)
 
-            return self.information
+            return None
 
         elif report_type_lower == 'secret':
             # Extract secret value from description (after "Value: ")
             value_match = re.search(r'Value:\s*([^\s,]+)', self.description, re.IGNORECASE)
             if value_match:
                 return value_match.group(1)
-            return self.information
+            return None
 
         elif report_type_lower in ['credentials', 'code']:
-            # Return information as-is
-            return self.information
+            # For code reports, try to extract rule IDs or other relevant information
+            rule_match = re.search(r'Rule:\s*([^\s,]+)', self.description, re.IGNORECASE)
+            if rule_match:
+                return rule_match.group(1)
+            return None
 
         return None
 

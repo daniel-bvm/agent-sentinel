@@ -117,7 +117,9 @@ def parse_codeql_results(
             file_path=file_name if file_name != "no-file-information" else None,
             line_number=line_number,
             language="code",  # Will be set by caller based on language scanned
-            cwe=cwe
+            cwe=cwe,
+            information=rule_id,  # Add rule ID as information
+            report_type="code"
         )
 
         reports.append(report)
@@ -131,7 +133,7 @@ def download_codeql_pack(language: str) -> None:
     if language not in CODEQL_SUPPORTED_LANGUAGES:
         logger.info(f"Language {language} is not supported by CodeQL. Skipping CodeQL pack download.")
         raise RuntimeError(f"Language {language} is not supported by CodeQL.")
-    
+
     # if the file is already downloaded, skip the download
     if os.path.exists(f"codeql/{language}-queries"):
         logger.info(f"CodeQL pack for {language} already downloaded. Skipping download.")
@@ -151,7 +153,7 @@ def download_codeql_pack(language: str) -> None:
 def create_codeql_database(scan_path: str, language: str) -> str:
     """Create a CodeQL database for a given path with a given language."""
     logger.info(f"Creating CodeQL database for {scan_path} with {language}...")
-    
+
     if language not in CODEQL_SUPPORTED_LANGUAGES:
         logger.info(f"Language {language} is not supported by CodeQL. Skipping CodeQL database creation.")
         raise RuntimeError(f"Language {language} is not supported by CodeQL.")
