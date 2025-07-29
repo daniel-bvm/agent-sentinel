@@ -1,1 +1,1 @@
-from .main import mcp, audit_mcp
+from .main import mcp, audit_mcp, diff_mcp

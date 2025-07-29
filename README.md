@@ -7,6 +7,7 @@ Agent Sentinel is a comprehensive security analysis tool designed to identify vu
 ### MCP Servers
 - **Sentinel - Security Analysis Agent** (`mcp`): Git repository operations and file analysis
 - **Sentinel - Audit Agent** (`audit_mcp`): Security scanning and vulnerability detection
+- **Sentinel - Diff Analysis Agent** (`diff_mcp`): Git working tree analysis for live development workflow
 
 ### FastAPI Server
 - RESTful API endpoints for chat-based interactions
@@ -40,11 +41,41 @@ Agent Sentinel is a comprehensive security analysis tool designed to identify vu
 - **Streaming results** as scans complete
 - **Error handling** and reporting
 
+### 🔄 Git Working Tree Analysis Features
+- **Live development workflow support** for Docker-mounted local repositories
+- **Efficient scanning** - only analyzes files that have actually changed
+- **Working tree scanning** shows all uncommitted changes (staged + unstaged)
+- **Staged changes analysis** for reviewing commits before they're made
+- **Unstaged changes detection** for tracking current work-in-progress
+- **Git status information** with categorized file states (modified, added, deleted, untracked)
+- **Path-specific analysis** for focusing on particular files or directories
+- **Real-time change tracking** as developers edit code in their local repository
+
 ## Installation
 
 ```bash
 pip install -e .
 ```
+
+## Docker Usage
+
+The git working tree analysis tool is designed for live development workflow with Docker:
+
+```bash
+# Mount your local repository to the container
+docker run -v /path/to/your/repo:/app/repo your-image
+
+# As you edit files in your local repo, scan for changes:
+scan_git_diff("/app/repo", mode="working")        # All uncommitted changes
+scan_git_diff("/app/repo", mode="status")         # Git status overview
+scan_git_diff("/app/repo", "src/", mode="unstaged") # Unstaged changes in src/
+```
+
+**Development Workflow:**
+1. Mount your local git repository to the Docker container
+2. Edit code files directly in your local repository
+3. Use the tool to analyze your current working changes
+4. Get real-time insights into what you've modified before committing
 
 ## Configuration
 
@@ -107,6 +138,24 @@ async for report in scan_dependencies_vulnerabilities("https://github.com/user/r
 # Static code analysis
 async for report in scan_code_quality_security("https://github.com/user/repo"):
     print(report)
+```
+
+#### Git Working Tree Analysis Tool
+```python
+# Show all working tree changes vs HEAD (staged + unstaged)
+scan_git_diff("/app/repo", mode="working")
+
+# Show working tree changes for specific path
+scan_git_diff("/app/repo", "src/main.py", mode="working")
+
+# Show only staged changes ready for commit
+scan_git_diff("/app/repo", mode="staged")
+
+# Show only unstaged changes in working directory
+scan_git_diff("/app/repo", "src/", mode="unstaged")
+
+# Get git status information (modified, added, deleted files)
+scan_git_diff("/app/repo", mode="status")
 ```
 
 ### FastAPI Server

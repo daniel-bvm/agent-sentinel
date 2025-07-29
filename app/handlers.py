@@ -77,7 +77,7 @@ async def get_system_prompt(messages: list[ChatCompletionMessageParam] | list[di
 
     return base
 
-from src.agent_sentinel import mcp as git_action_mcp, audit_mcp as source_code_mcp, main as security_scanners
+from src.agent_sentinel import mcp as git_action_mcp, audit_mcp as source_code_mcp, diff_mcp as diff_analysis_mcp, main as security_scanners
 from src.agent_sentinel.utils import merge_reports, Report, ErrorReport, SeverityLevel
 from src.agent_sentinel.git_utils import RepoInfo, clone_repo, get_directory_tree
 from src.agent_sentinel.cwe_utils import get_cwe_by_id, CWEWeakness
@@ -88,7 +88,8 @@ class FullyHandoff(OpenAIBaseModel): pass
 async def list_toolcalls() -> list[dict[str, Any]]:
     res = [
         *(await git_action_mcp._mcp_list_tools()),
-        *(await source_code_mcp._mcp_list_tools())
+        *(await source_code_mcp._mcp_list_tools()),
+        *(await diff_analysis_mcp._mcp_list_tools())
     ]
 
     return convert_mcp_tools_to_openai_format(res)
@@ -1036,6 +1037,11 @@ async def execute_toolcall_request(
     for tool in await source_code_mcp._mcp_list_tools():
         if tool.name == tool_name:
             return handoff(tool_name, tool_args, arm, event) # async generator, no need to await
+
+    # Check diff_analysis_mcp tools
+    for tool in await diff_analysis_mcp._mcp_list_tools():
+        if tool.name == tool_name:
+            return await execute_openai_compatible_toolcall(tool_name, tool_args, diff_analysis_mcp)
 
     return await execute_openai_compatible_toolcall(tool_name, tool_args, git_action_mcp)
 
