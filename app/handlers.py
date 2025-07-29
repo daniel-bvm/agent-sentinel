@@ -898,7 +898,8 @@ async def generate_security_deep_report(
     confirmed_reports: list[Report],
     arm: AgentResourceManager,
     event: asyncio.Event,
-    repo: RepoInfo | None = None
+    repo: RepoInfo | None = None,
+    deep: bool=True
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     # Repo object is now passed as parameter
 
@@ -934,10 +935,12 @@ async def generate_security_deep_report(
     async for chunk in generate_headline(df, repo, arm, event):
         yield chunk
 
+    if not deep:
+        return
+
     if len(high_severity_df) > 0:
         async for chunk in generate_high_severity_report(high_severity_df, repo, arm, event):
             yield chunk
-
 
     if len(medium_severity_df) > 0:
         async for chunk in generate_medium_severity_report(medium_severity_df, repo, arm, event):
@@ -946,12 +949,6 @@ async def generate_security_deep_report(
     if len(other_df) > 0:
         async for chunk in generate_other_severity_report(other_df, repo, arm, event):
             yield chunk
-
-async def generate_security_report(
-    confirmed_reports: list[Report],
-    event: asyncio.Event
-) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
-    yield wrap_chunk(random_uuid(), merge_reports(confirmed_reports), "assistant")
 
 async def handoff(
     tool_name: str,
@@ -1007,15 +1004,10 @@ async def handoff(
         yield wrap_chunk(random_uuid(), f"Repository is well-secured, no issues found!", "assistant")
         return
 
-    if deep_mode:
-        yield FullyHandoff()
+    yield FullyHandoff()
 
-        async for chunk in generate_security_deep_report(confirmed_reports, arm, event, repo):
-            yield chunk
-
-    else:
-        async for chunk in generate_security_report(confirmed_reports, event):
-            yield chunk
+    async for chunk in generate_security_deep_report(confirmed_reports, arm, event, repo, deep_mode):
+        yield chunk
 
 async def execute_toolcall_request(
     tool_name: str,
