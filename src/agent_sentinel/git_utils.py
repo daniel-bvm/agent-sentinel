@@ -194,13 +194,20 @@ def git_directory_structure(repo_url: str, subfolder: str = "", max_depth: int =
 
 class RepoInfo:
     DEFAULT_REMOTE_NAME = 'origin'
+    
+    def get_remote_safe(self) -> str | None:
+        try:
+            self.repo.remote(self.DEFAULT_REMOTE_NAME).url
+        except Exception as e:
+            logger.warning(f"Error getting remote URL: {e}")
+            return None
 
     def __init__(self, repo_path: str, target_path: str = ""):
         self.repo_path = repo_path
         self.target_path = target_path
         self.repo = git.Repo(repo_path)
         self.branch = re.sub(rf'^(remotes/)?{self.DEFAULT_REMOTE_NAME}/', '', self.repo.active_branch.name)
-        self.repo_url = re.sub(r'\.git$', '', self.repo.remote(self.DEFAULT_REMOTE_NAME).url).strip("/")
+        self.repo_url = re.sub(r'\.git$', '', self.get_remote_safe() or "").strip("/")
 
         # Determine scan context
         if target_path:
@@ -217,14 +224,15 @@ class RepoInfo:
         return f"RepoInfo(repo_url={self.repo_url}, branch={self.branch}{context}{file_type})"
 
     def get_reference(self, file: str, line_start: str | int | None = None, line_end: str | int | None = None) -> str:
+        pref = f"{self.repo_url}/blob/{self.branch}/" if self.repo_url else ""
+
         if line_start is not None and line_end is None:
-            return f"{self.repo_url}/blob/{self.branch}/{file}#L{line_start}"
+            return f"{pref}{file}#L{line_start}"
 
         elif line_start is not None and line_end is not None:
-            return f"{self.repo_url}/blob/{self.branch}/{file}#L{line_start}-L{line_end}" if line_start != line_end else f"{self.repo_url}/blob/{self.branch}/{file}#L{line_start}"
+            return f"{pref}{file}#L{line_start}-L{line_end}" if line_start != line_end else f"{pref}{file}#L{line_start}"
 
-        else:
-            return f"{self.repo_url}/blob/{self.branch}/{file}"
+        return f"{pref}{file}"
 
     def reveal_content(self, file: str, line_start: str | int, line_end: str | int, A: int = 0, B: int = 0) -> str | None:
         if isinstance(line_start, str) and line_start.isdigit():
