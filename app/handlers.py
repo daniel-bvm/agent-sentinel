@@ -1118,6 +1118,9 @@ async def handle_request(
 
                         _result += chunk_content
 
+                    if fully_handoff:
+                        return
+
                 except Exception as e:
                     logger.error(f"Error executing toolcall: {e}", exc_info=True)
                     _result = f"Error executing toolcall: {e}"
