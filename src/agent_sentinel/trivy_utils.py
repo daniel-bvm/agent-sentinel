@@ -146,7 +146,7 @@ def _parse_trivy_report(report_path: str) -> list[Report]:
                 language=language,
                 cwe=cwe,
                 cve=vuln_id,
-                information=_extract_dependency_information(vuln),  # Add dependency information
+                information=_extract_dependency_information(vulnerability),  # Add dependency information
                 report_type="dependency" if language == "dependency" else "code"
             )
 
