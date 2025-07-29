@@ -197,25 +197,14 @@ def change_information(report: Report, description: str, cwe: str) -> Report:
 
 
 def is_match(report_1: Report, report_2: Report) -> bool:
-    if report_1.language.lower() in ['secret', 'credentials', 'code', 'dependency']:
-        return False
-
-    if report_1.file_path != report_2.file_path:
-        return False
-
-    if report_1.line_start != report_2.line_start:
-        return False
-
-    if report_1.line_end != report_2.line_end:
-        return False
-
-    if report_1.cwe != report_2.cwe:
-        return False
-
-    if report_1.processed_information != report_2.processed_information:
-        return False
-
-    return True
+    return (
+        report_1.file_path == report_2.file_path and
+        report_1.language == report_2.language and
+        report_1.processed_information == report_2.processed_information and
+        report_1.cwe == report_2.cwe and
+        report_1.line_start == report_2.line_start and
+        report_1.line_end == report_2.line_end
+    )
 
 import base64
 
@@ -247,7 +236,7 @@ async def confirm_report(report: Report, confirmed_reports: list[Report], deep_m
         logger.info(f"Report is already confirmed: {report}")
         return None
 
-    if report.language == 'dependency':
+    if report.report_type == 'dependency':
         logger.info(f"Dependency report is no need to be confirmed again")
         return report
 
