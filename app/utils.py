@@ -87,17 +87,18 @@ class AgentResourceManager:
     ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
         buffer: str = ''
 
-        cut_tags_str = "|".join(cut_tags)
-        tags_str = "|".join(["file", "img", "data", "files", *cut_tags])
+        citing_pat_str = r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>".format(
+            tags_str="|".join(["file", "img", "data", "files", *cut_tags])
+        )
 
-        citing_pat_str = r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>".format(tags_str=tags_str)
-        cut_pat_str = r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>".format(tags_str=cut_tags_str) if cut_tags_str else ""
+        citing_pat = regex.compile("|".join([citing_pat_str, *cut_pats]), 
+                                   regex.DOTALL | regex.IGNORECASE | regex.MULTILINE)
 
-        if cut_pat_str:
-            cut_pats.append(cut_pat_str)
-
-        citing_pat = regex.compile(citing_pat_str, regex.DOTALL | regex.IGNORECASE | regex.MULTILINE)
-        cut_pat = regex.compile("|".join(cut_pats), regex.DOTALL | regex.IGNORECASE | regex.MULTILINE) if len(cut_pats) else None
+        cut_pat_str = "|".join([*cut_pats, r"<({tags_str})\b[^>]*>(.*?)</\1>|<({tags_str})\b[^>]*/>".format(tags_str="|".join(cut_tags))]) \
+            if cut_pats or cut_tags else ""
+    
+        cut_pat = regex.compile(cut_pat_str,
+                                regex.DOTALL | regex.IGNORECASE | regex.MULTILINE) if cut_pat_str else None
 
         logger.info("Watching for citing_pat: {}".format(citing_pat))
         logger.info("Watching for cut_pat: {}".format(cut_pat))
