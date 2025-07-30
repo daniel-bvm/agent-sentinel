@@ -1100,6 +1100,10 @@ async def handle_request(
                     fully_handoff = False
 
                     async for chunk in result:
+                        if event.is_set():
+                            logger.info(f"[toolcall] Event signal received, stopping the toolcall")
+                            break
+
                         if isinstance(chunk, FullyHandoff):
                             fully_handoff = True
                             continue
@@ -1144,7 +1148,7 @@ async def handle_request(
                 }
             )
 
-        finished = len(toolcalls_requested) == 0
+        finished = len(toolcalls_requested) == 0 or event.is_set()
 
     os.makedirs("logs", exist_ok=True)
     with open(f"logs/messages-{request.request_id}.json", "w") as f:

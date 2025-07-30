@@ -11,7 +11,7 @@ import hashlib
 import shutil
 from pathlib import Path
 
-from typing import Any, AsyncGenerator, Awaitable
+from typing import Any, AsyncGenerator, Awaitable, Literal
 from .utils import run_command, detect_project_languages, patch_foundry_config, sync2async
 import json_repair
 from collections import defaultdict
@@ -19,6 +19,7 @@ from .git_utils import clone_repo
 from .codeql_utils import run_codeql_scanner
 from .trivy_utils import scan_with_trivy
 from .models import cwe_mapping, Report, ErrorReport, SeverityLevel
+from .diff_utils import scan_git_diff
 
 logger = logging.getLogger(__name__)
 
@@ -167,68 +168,82 @@ def _convert_npm_audit_to_reports(npm_result: dict[str, Any]) -> list[Report]:
         ))
     return reports
 
-async def comprehensive_security_scan_concurrent(repo_url: str, target_path: str = "", branch_name: str = None, deep: bool = True) -> AsyncGenerator[Report | ErrorReport, None]:
-    """
-    Perform a comprehensive security scan of a GitHub repository concurrently.
+def compare_path(path_1: str, path_2: str) -> bool:
+    """Compare two paths and return True if they are the same."""
+    norm_path1 = os.path.normpath(path_1)
+    norm_path2 = os.path.normpath(path_2)
+    return norm_path1 == norm_path2
 
-    Args:
-        repo_url: The URL of the Git repository to scan
-        target_path: Optional path to a specific subfolder or file within the repository
-        branch_name: Optional branch name to checkout before scanning
+async def comprehensive_security_scan_concurrent(
+    repo_url: str, 
+    paths: list[str] = [], 
+    branch_name: str = None, 
+    mode: Literal["full", "working", "staged", "unstaged"] = "full", 
+    deep: bool = True
+) -> AsyncGenerator[Report | ErrorReport, None]:
 
-    Yields:
-        Report or ErrorReport objects as scans complete
-    """
     # Clone the repository and checkout branch if specified
     repo_path = await sync2async(clone_repo)(repo_url, branch_name)
-    scan_path = os.path.join(repo_path, target_path) if target_path else repo_path
 
-    # Check if scan_path is a file or directory and set up appropriate paths
-    is_single_file = os.path.isfile(scan_path)
-    if is_single_file:
-        # For single file scanning, we need the parent directory for some tools
-        scan_dir = os.path.dirname(scan_path)
-        target_file = scan_path
-    else:
-        scan_dir = scan_path
-        target_file = None
+    if mode != 'full':
+        diff = scan_git_diff(repo_path, mode=mode)
+        diff_file_changes = diff.get("file_changes", [])
+        paths = [
+            path
+            for path in paths
+            if any(
+                compare_path(path, diff_file_change) 
+                for diff_file_change in diff_file_changes
+            )
+        ]
 
-    # Detect languages
-    languages = await sync2async(detect_project_languages)(scan_path)
+    for target_path in paths:
+        scan_path = os.path.join(repo_path, target_path) if target_path else repo_path
 
-    # Prepare concurrent tasks
-    tasks = []
+        # Check if scan_path is a file or directory and set up appropriate paths
+        is_single_file = os.path.isfile(scan_path)
+        if is_single_file:
+            # For single file scanning, we need the parent directory for some tools
+            scan_dir = os.path.dirname(scan_path)
+        else:
+            scan_dir = scan_path
 
-    # Run Solidity-specific scans
-    if "solidity" in languages:
-        if deep:
-            # Try Mythril for deep analysis when deep=True, fallback to Slither if not available
-            # Check if Mythril is available first
-            mythril_check = await sync2async(run_command)(["which", "myth"])
-            if mythril_check["success"]:
-                # Mythril can handle individual files
-                tasks.append(a_stupid_wrapper("mythril", sync2async(scan_solidity_mythril)(scan_path)))
+        # Detect languages
+        languages = await sync2async(detect_project_languages)(scan_path)
+
+        # Prepare concurrent tasks
+        tasks = []
+
+        # Run Solidity-specific scans
+        if "solidity" in languages:
+            if deep:
+                # Try Mythril for deep analysis when deep=True, fallback to Slither if not available
+                # Check if Mythril is available first
+                mythril_check = await sync2async(run_command)(["which", "myth"])
+                if mythril_check["success"]:
+                    # Mythril can handle individual files
+                    tasks.append(a_stupid_wrapper("mythril", sync2async(scan_solidity_mythril)(scan_path)))
+                else:
+                    logger.warning("Mythril not available for deep analysis, falling back to Slither")
+                    # Slither needs directory
+                    slither_path = scan_dir if is_single_file else scan_path
+                    tasks.append(a_stupid_wrapper("slither", sync2async(scan_solidity_slither)(slither_path)))
             else:
-                logger.warning("Mythril not available for deep analysis, falling back to Slither")
-                # Slither needs directory
+                # Use Slither for faster analysis when deep=False - Slither needs directory
                 slither_path = scan_dir if is_single_file else scan_path
                 tasks.append(a_stupid_wrapper("slither", sync2async(scan_solidity_slither)(slither_path)))
-        else:
-            # Use Slither for faster analysis when deep=False - Slither needs directory
-            slither_path = scan_dir if is_single_file else scan_path
-            tasks.append(a_stupid_wrapper("slither", sync2async(scan_solidity_slither)(slither_path)))
 
-    # Schedule general security scans (these can handle files directly)
-    tasks.append(a_stupid_wrapper("secrets", sync2async(scan_secrets_with_gitleaks)(scan_path)))
-    tasks.append(a_stupid_wrapper("semgrep", sync2async(scan_semgrep)(scan_path)))
+        # Schedule general security scans (these can handle files directly)
+        tasks.append(a_stupid_wrapper("secrets", sync2async(scan_secrets_with_gitleaks)(scan_path)))
+        tasks.append(a_stupid_wrapper("semgrep", sync2async(scan_semgrep)(scan_path)))
 
-    # Schedule CodeQL analysis for each language (CodeQL needs directory)
-    for language in languages:
-        codeql_path = scan_dir if is_single_file else scan_path
-        tasks.append(a_stupid_wrapper(f"codeql_{language}", sync2async(run_codeql_scanner)(codeql_path, language)))
+        # Schedule CodeQL analysis for each language (CodeQL needs directory)
+        for language in languages:
+            codeql_path = scan_dir if is_single_file else scan_path
+            tasks.append(a_stupid_wrapper(f"codeql_{language}", sync2async(run_codeql_scanner)(codeql_path, language)))
 
-    # Schedule Trivy scan (can handle files directly)
-    tasks.append(a_stupid_wrapper("trivy", sync2async(scan_with_trivy)(scan_path)))
+        # Schedule Trivy scan (can handle files directly)
+        tasks.append(a_stupid_wrapper("trivy", sync2async(scan_with_trivy)(scan_path)))
 
     # Process completed tasks as they finish
     for task in asyncio.as_completed(tasks):
