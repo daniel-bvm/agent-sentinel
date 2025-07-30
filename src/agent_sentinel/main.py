@@ -7,6 +7,7 @@ from typing import AsyncGenerator
 from . import security_scanners
 from .security_scanners import Report, ErrorReport
 from typing import Literal
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +18,11 @@ diff_mcp = FastMCP("Sentinel - Diff Analysis Agent", dependencies=["gitpython"])
 @audit_mcp.tool(
     description="Perform a comprehensive security scan of a GitHub repository and get the report. Can scan a specific subfolder or individual file within the repository.",
     annotations={
-        "github_repo": "Github repository to scan.",
+        "github_repo": "Github repository to scan. Can be local path or github url.",
         "paths": "Specific paths to scan. By default, all detected files/folders are scanned.",
         "branch_name": "Specify the branch to scan. Use None as default branch.",
         "mode": "The mode to scan the repository in. 'full' mode scans all files/folders, 'working' scans only the working tree changes. For quick scans, use working mode",
-        "deep": "Perform extra scans on the repository. Deep mode takes more time to run."
+        "deep": "Perform extra scans on the source code. Deep mode takes more time to run."
     }
 )
 async def security_scan(
@@ -31,6 +32,9 @@ async def security_scan(
     mode: Literal["working", "full"] = "full",
     deep: bool = True
 ) -> AsyncGenerator[Report | ErrorReport, None]:
+
+    if not github_repo.startswith("http") and not os.path.exists(github_repo):
+        github_repo = f"https://github.com/{github_repo}"
 
     is_remote_url = github_repo.startswith("http")
     logger.info(f"Scanning repository {github_repo} with target path {paths} and branch name {branch_name} and deep mode {deep}")

@@ -460,7 +460,7 @@ def generate_chart_markdown(df: DataFrame, chart_type: str, x_axis: str, y_axis:
         logger.error(f"Error generating chart: {e}", exc_info=True)
         return f"Error generating chart: {str(e)}"
 
-async def generate_headline(df: DataFrame, repo: RepoInfo | None, arm: AgentResourceManager, event: asyncio.Event) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
+async def generate_headline(df: DataFrame, repo: RepoInfo | None, arm: AgentResourceManager, event: asyncio.Event, user_message: str) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     """Generate executive summary and overview of the security scan results."""
 
     total_issues = len(df)
@@ -498,6 +498,9 @@ async def generate_headline(df: DataFrame, repo: RepoInfo | None, arm: AgentReso
     }
 
     system_prompt = f"""You are a cybersecurity expert creating an executive summary for a security scan report.
+
+User Message:
+{user_message}
 
 Scan Results Context:
 - Total Issues Found: {context['total_issues']}
@@ -603,7 +606,8 @@ async def generate_other_severity_report(
     df: DataFrame,
     repo: RepoInfo | None,
     arm: AgentResourceManager,
-    event: asyncio.Event
+    event: asyncio.Event,
+    user_message: str
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     """Generate summary report for LOW severity and other issues."""
 
@@ -649,7 +653,7 @@ async def generate_other_severity_report(
     if not event.is_set() and len(other_df) > 0:
         yield wrap_chunk(random_uuid(), "\n### 💡 Next Steps\n\n", "assistant")
 
-        async for chunk in _generate_low_priority_recommendations(other_df, repo, arm, event):
+        async for chunk in _generate_low_priority_recommendations(other_df, repo, arm, event, user_message):
             if event.is_set():
                 break
             yield chunk
@@ -658,7 +662,8 @@ async def _generate_low_priority_recommendations(
     df: DataFrame,
     repo: RepoInfo | None,
     arm: AgentResourceManager,
-    event: asyncio.Event
+    event: asyncio.Event,
+    user_message: str
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     """Generate LLM recommendations for low priority security issues."""
 
@@ -700,6 +705,9 @@ async def _generate_low_priority_recommendations(
     sample_issues = sample_issues[['file_path', 'description', 'cwe', 'tool', 'context']].to_dict('records')
 
     system_prompt = f"""You are a cybersecurity consultant providing strategic recommendations for managing low-priority security issues.
+
+User Message:
+{user_message}
 
 ## Summary
 - **Total low priority issues:** {total_issues}
@@ -899,7 +907,8 @@ async def generate_security_deep_report(
     arm: AgentResourceManager,
     event: asyncio.Event,
     repo: RepoInfo | None = None,
-    deep: bool=True
+    deep: bool=True,
+    user_message: str = ""
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     # Repo object is now passed as parameter
 
@@ -932,7 +941,7 @@ async def generate_security_deep_report(
     medium_severity_df = df[df['severity'] == 'MEDIUM']
     other_df = df[~df['severity'].isin(['CRITICAL', 'HIGH', 'MEDIUM'])]
 
-    async for chunk in generate_headline(df, repo, arm, event):
+    async for chunk in generate_headline(df, repo, arm, event, user_message):
         yield chunk
 
     if not deep:
@@ -947,14 +956,15 @@ async def generate_security_deep_report(
             yield chunk
 
     if len(other_df) > 0:
-        async for chunk in generate_other_severity_report(other_df, repo, arm, event):
+        async for chunk in generate_other_severity_report(other_df, repo, arm, event, user_message):
             yield chunk
 
 async def handoff(
     tool_name: str,
     tool_args: dict[str, Any],
     arm: AgentResourceManager,
-    event: asyncio.Event
+    event: asyncio.Event,
+    user_message: str
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse | FullyHandoff, None]:
 
     if tool_name not in fn_mapping:
@@ -964,13 +974,12 @@ async def handoff(
     fn = fn_mapping[tool_name]
     confirmed_reports = []
     deep_mode = tool_args.get('deep', True)
-    repo_url = tool_args.get('repo_url', None)
-    target_path = tool_args.get('target_path', "")
+    repo_url = tool_args.get('github_repo', None)
 
     repo = None
 
     if repo_url is not None:
-        repo = RepoInfo(clone_repo(repo_url, tool_args.get('branch', None)), target_path)
+        repo = RepoInfo(clone_repo(repo_url, tool_args.get('branch', None)))
 
     if not repo:
         yield wrap_chunk(random_uuid(), f"Repository is invalid or not accessible. No security scan is performed.", "assistant")
@@ -1006,18 +1015,21 @@ async def handoff(
 
     yield FullyHandoff()
 
-    async for chunk in generate_security_deep_report(confirmed_reports, arm, event, repo, deep_mode):
+    async for chunk in generate_security_deep_report(confirmed_reports, arm, event, repo, deep_mode, user_message):
         yield chunk
 
 async def execute_toolcall_request(
     tool_name: str,
     tool_args: dict[str, Any],
     arm: AgentResourceManager,
-    event: asyncio.Event
+    event: asyncio.Event,
+    user_message: str
 ) -> list[Union[TextContent, EmbeddedResource]] | AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
+    logger.info(f"[toolcall] Executing toolcall request for {tool_name} with args: {tool_args}")
+
     for tool in await source_code_mcp._mcp_list_tools():
         if tool.name == tool_name:
-            return handoff(tool_name, tool_args, arm, event) # async generator, no need to await
+            return handoff(tool_name, tool_args, arm, event, user_message) # async generator, no need to await
 
     # Check diff_analysis_mcp tools
     for tool in await diff_analysis_mcp._mcp_list_tools():
@@ -1045,6 +1057,8 @@ async def handle_request(
 
     finished = False
     n_calls, max_calls = 0, 25
+
+    user_message = messages[-1].get("content", "")
 
     while not finished and not event.is_set():
         completion_builder = ChatCompletionResponseBuilder()
@@ -1093,7 +1107,7 @@ async def handle_request(
             _result = ""
 
             yield wrap_chunk(random_uuid(), f"<action>Running {_name}...</action>", "assistant")
-            result = await execute_toolcall_request(_name, _args, arm, event)
+            result = await execute_toolcall_request(_name, _args, arm, event, user_message)
 
             if isinstance(result, AsyncGenerator):
                 try:

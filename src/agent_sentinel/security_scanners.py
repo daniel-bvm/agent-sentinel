@@ -184,26 +184,31 @@ async def comprehensive_security_scan_concurrent(
 
     # Clone the repository and checkout branch if specified
     repo_path = await sync2async(clone_repo)(repo_url, branch_name)
+    print('DEBUG: repo_path', repo_path)
 
     if mode != 'full':
-        diff = scan_git_diff(repo_path, mode=mode)
+        logger.info(f"Scanning repository {repo_url} with mode {mode}; original paths ({paths}) is skipped")
+    
+        diff: dict[str, Any] = await sync2async(scan_git_diff)(repo_path, mode=mode)
         diff_file_changes = diff.get("file_changes", [])
+
         paths = [
-            path
-            for path in paths
-            if any(
-                compare_path(path, diff_file_change) 
-                for diff_file_change in diff_file_changes
-            )
+            file for file in diff_file_changes
         ]
+        
+    elif not paths:
+        paths.append(repo_path)
 
-    for target_path in paths:
-        scan_path = os.path.join(repo_path, target_path) if target_path else repo_path
+    else:
+        paths = [
+            os.path.join(repo_path, path) 
+            for path in paths
+        ]
+    
 
-        # Check if scan_path is a file or directory and set up appropriate paths
+    for scan_path in paths:
         is_single_file = os.path.isfile(scan_path)
         if is_single_file:
-            # For single file scanning, we need the parent directory for some tools
             scan_dir = os.path.dirname(scan_path)
         else:
             scan_dir = scan_path
