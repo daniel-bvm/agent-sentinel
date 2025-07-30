@@ -16,6 +16,7 @@ import json
 from mcp.types import TextContent, EmbeddedResource
 import re
 from src.agent_sentinel.utils import detect_project_languages
+from src.agent_sentinel.git_utils import detect_github_repo
 from collections import Counter
 
 logger = logging.getLogger(__name__)
@@ -975,10 +976,31 @@ async def handoff(
     confirmed_reports = []
     deep_mode = tool_args.get('deep', True)
     repo_url = tool_args.get('github_repo', None)
+    tool_args.setdefault('paths', [])
+    
+    if not isinstance(tool_args['paths'], list):
+        logger.warning(f"Paths is not a list, converting to list: {tool_args['paths']}")
+        
+        if not isinstance(tool_args['paths'], str):
+            logger.warning(f"Paths is not a string, converting to string: {tool_args['paths']}")
+            tool_args['paths'] = []
+        
+        else:
+            tool_args['paths'] = [tool_args['paths']]
+        
 
     repo = None
 
     if repo_url is not None:
+        if not repo_url.startswith("http") and os.path.exists(repo_url):
+            repo_path, sub_dir = detect_github_repo(repo_url)
+            
+            if repo_path:
+                repo_url = repo_path
+
+            if sub_dir:
+                tool_args['paths'].extend(sub_dir)
+
         repo = RepoInfo(clone_repo(repo_url, tool_args.get('branch', None)))
 
     if not repo:

@@ -12,7 +12,52 @@ import json
 
 logger = logging.getLogger(__name__)
 
+def detect_github_repo(path: str) -> tuple[str, str | None]:
+    # the path can be a sub-path of a github repo
+    parts = os.path.normpath(path).split(os.path.sep)
+
+    for i in range(len(parts)):
+        if os.path.exists(os.path.join(parts[:i], ".git")):
+            return os.path.join(parts[:i], ".git"), parts[i:] if i < len(parts) - 1 else None
+
+    return None, None
+    
+def prepare_repo(path: str, branch_name: str | None = None, remove_on_error: bool = False) -> str:
+    repo = git.Repo(path)
+
+    if not repo.bare:
+        origin = repo.remotes.origin
+        origin.pull()
+
+        # Checkout the specified branch if provided
+        if branch_name:
+            try:
+                # Fetch all branches to ensure we have the latest
+                origin.fetch()
+
+                # Check if branch exists locally
+                if branch_name in [branch.name for branch in repo.branches]:
+                    repo.git.checkout(branch_name)
+                elif f"origin/{branch_name}" in [ref.name for ref in repo.remote().refs]:
+                    repo.git.checkout('-b', branch_name, f'origin/{branch_name}')
+                else:
+                    raise Exception(f"Branch '{branch_name}' does not exist in the repository")
+            except Exception as e:
+                # Clean up on error and re-clone
+                if remove_on_error:
+                    shutil.rmtree(path, ignore_errors=True)
+                raise Exception(f"Failed to checkout branch '{branch_name}': {str(e)}")
+
+        return path
+
 def clone_repo(repo_url: str, branch_name: str = None) -> str:
+    if not repo_url.startswith("http") and os.path.exists(repo_url):
+        try:
+            return prepare_repo(repo_url, branch_name, remove_on_error=False)
+        except Exception as e:
+            logger.warning(f"Failed to initialize repository: {e}")
+            return None
+
     """Clone a repository and return the path. If repository is already cloned in temp directory, reuse it."""
     # Create a deterministic directory name based on repo URL
     token = os.getenv("GITHUB_ACCESS_TOKEN", "")
@@ -33,31 +78,7 @@ def clone_repo(repo_url: str, branch_name: str = None) -> str:
     # If directory exists and is a valid git repo, return it
     if os.path.exists(temp_dir):
         try:
-            repo = git.Repo(temp_dir)
-            if not repo.bare and repo.remote().url == repo_url:
-                origin = repo.remotes.origin
-                origin.pull()
-
-                # Checkout the specified branch if provided
-                if branch_name:
-                    try:
-                        # Fetch all branches to ensure we have the latest
-                        origin.fetch()
-
-                        # Check if branch exists locally
-                        if branch_name in [branch.name for branch in repo.branches]:
-                            repo.git.checkout(branch_name)
-                        # Check if branch exists remotely
-                        elif f"origin/{branch_name}" in [ref.name for ref in repo.remote().refs]:
-                            repo.git.checkout('-b', branch_name, f'origin/{branch_name}')
-                        else:
-                            raise Exception(f"Branch '{branch_name}' does not exist in the repository")
-                    except Exception as e:
-                        # Clean up on error and re-clone
-                        shutil.rmtree(temp_dir, ignore_errors=True)
-                        raise Exception(f"Failed to checkout branch '{branch_name}': {str(e)}")
-
-                return temp_dir
+            return prepare_repo(temp_dir, branch_name, remove_on_error=True)
         except Exception:
             # If there's any error with existing repo, clean it up
             shutil.rmtree(temp_dir, ignore_errors=True)
