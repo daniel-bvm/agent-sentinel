@@ -16,7 +16,7 @@ audit_mcp = FastMCP("Sentinel - Audit Agent", dependencies=["gitpython"])
 diff_mcp = FastMCP("Sentinel - Diff Analysis Agent", dependencies=["gitpython"])
 
 @audit_mcp.tool(
-    description="Perform a comprehensive security scan of a GitHub repository and get the report. Can scan a specific subfolder or individual file within the repository.",
+    description="Perform a comprehensive security scan of a GitHub repository, and or sub-folders, files in the repository, and get the report. mythril, slither, gitleaks, semgrep, codeql and  trivy are used to boost the result confidence.",
     annotations={
         "github_repo": "Github repository to scan. It can be local path or github url.",
         "paths": "Specific paths to scan. By default, all detected files/folders are scanned.",
