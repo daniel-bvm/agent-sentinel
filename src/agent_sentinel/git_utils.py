@@ -20,7 +20,7 @@ def detect_github_repo(path: str) -> tuple[str, str | None]:
         if os.path.exists(os.path.join(*parts[:i], ".git")):
             return (
                 os.path.join(*parts[:i]), 
-                os.path.join(*parts[i:]) if i < len(parts) - 1 else None
+                os.path.join(*parts[i:]) if i < len(parts) else None
             )
 
     return None, None
@@ -54,14 +54,14 @@ def prepare_repo(path: str, branch_name: str | None = None, remove_on_error: boo
 
                 raise Exception(f"Failed to checkout branch '{branch_name}': {str(e)}")
 
-        return path
+    return path
 
-def clone_repo(repo_url: str, branch_name: str = None) -> str:
+def clone_repo(repo_url: str, branch_name: str = None) -> str | None:
     if not repo_url.startswith("http") and os.path.exists(repo_url):
         try:
             return prepare_repo(repo_url, None, remove_on_error=False, pull=False)
         except Exception as e:
-            logger.warning(f"Failed to initialize repository: {e}")
+            logger.error(f"Failed to initialize repository: {str(e)}", exc_info=True)
             return None
 
     """Clone a repository and return the path. If repository is already cloned in temp directory, reuse it."""
@@ -248,7 +248,7 @@ class RepoInfo:
     def __str__(self) -> str:
         context = f", target={self.scan_target}" if self.scan_target else ""
         file_type = " (file)" if self.is_single_file else " (directory)" if self.scan_target else ""
-        return f"RepoInfo(repo_url={self.repo_url}, branch={self.branch}{context}{file_type})"
+        return f"RepoInfo(repo_url={self.repo_url}, repo_path={self.repo_path}, branch={self.branch}{context}{file_type})"
 
     def get_reference(self, file: str, line_start: str | int | None = None, line_end: str | int | None = None) -> str:
         pref = f"{self.repo_url}/blob/{self.branch}/" if self.repo_url else ""

@@ -204,6 +204,10 @@ async def comprehensive_security_scan_concurrent(
             for path in paths
         ]
 
+    repo_path = os.path.normpath(repo_path)
+    task_map_identity = {} # map id with the scan path
+    tasks = []
+
     for scan_path in paths:
         is_single_file = os.path.isfile(scan_path)
         if is_single_file:
@@ -214,9 +218,6 @@ async def comprehensive_security_scan_concurrent(
         # Detect languages
         languages = await sync2async(detect_project_languages)(scan_path)
 
-        # Prepare concurrent tasks
-        tasks = []
-
         # Run Solidity-specific scans
         if "solidity" in languages:
             if deep:
@@ -225,37 +226,38 @@ async def comprehensive_security_scan_concurrent(
                 mythril_check = await sync2async(run_command)(["which", "myth"])
                 if mythril_check["success"]:
                     # Mythril can handle individual files
-                    tasks.append(a_stupid_wrapper("mythril", sync2async(scan_solidity_mythril)(scan_path)))
+                    tasks.append(a_stupid_wrapper(scan_path, "mythril", sync2async(scan_solidity_mythril)(scan_path)))
                 else:
                     logger.warning("Mythril not available for deep analysis, falling back to Slither")
                     # Slither needs directory
                     slither_path = scan_dir if is_single_file else scan_path
-                    tasks.append(a_stupid_wrapper("slither", sync2async(scan_solidity_slither)(slither_path)))
+                    tasks.append(a_stupid_wrapper(slither_path, "slither", sync2async(scan_solidity_slither)(slither_path)))
             else:
                 # Use Slither for faster analysis when deep=False - Slither needs directory
                 slither_path = scan_dir if is_single_file else scan_path
-                tasks.append(a_stupid_wrapper("slither", sync2async(scan_solidity_slither)(slither_path)))
+                tasks.append(a_stupid_wrapper(slither_path, "slither", sync2async(scan_solidity_slither)(slither_path)))
 
         # Schedule general security scans (these can handle files directly)
-        tasks.append(a_stupid_wrapper("secrets", sync2async(scan_secrets_with_gitleaks)(scan_path)))
-        tasks.append(a_stupid_wrapper("semgrep", sync2async(scan_semgrep)(scan_path)))
+        tasks.append(a_stupid_wrapper(scan_path, "secrets", sync2async(scan_secrets_with_gitleaks)(scan_path)))
+        tasks.append(a_stupid_wrapper(scan_path, "semgrep", sync2async(scan_semgrep)(scan_path)))
 
         # Schedule CodeQL analysis for each language (CodeQL needs directory)
         for language in languages:
             codeql_path = scan_dir if is_single_file else scan_path
-            tasks.append(a_stupid_wrapper(f"codeql_{language}", sync2async(run_codeql_scanner)(codeql_path, language)))
+            tasks.append(a_stupid_wrapper(codeql_path, f"codeql_{language}", sync2async(run_codeql_scanner)(codeql_path, language)))
 
         # Schedule Trivy scan (can handle files directly)
-        tasks.append(a_stupid_wrapper("trivy", sync2async(scan_with_trivy)(scan_path)))
+        tasks.append(a_stupid_wrapper(scan_path, "trivy", sync2async(scan_with_trivy)(scan_path)))
 
     # Process completed tasks as they finish
     for task in asyncio.as_completed(tasks):
-        identity, result = await task
+        sub_path, identity, result = await task
 
         # Handle CodeQL results (which have language suffix)
         if identity.startswith("codeql_"):
             language = identity.replace("codeql_", "")
             post_processor = _get_codeql_post_processor(language)
+
         else:
             post_processor = TOOL_POST_PROCESSORS.get(identity)
 
@@ -265,9 +267,12 @@ async def comprehensive_security_scan_concurrent(
                     yield ErrorReport(tool=identity, reason=str(result))
                 else:
                     reports = post_processor(result)
+
                     for report in reports:
+                        report.file_path = os.path.relpath(os.path.join(sub_path, report.file_path), repo_path)
                         logger.info(f"Report file path: {report.file_path}")
                         yield report
+
             except Exception as e:
                 logger.error(f"Error processing {identity} results: {e}")
                 yield ErrorReport(tool=identity, reason=f"post_processing_error: {str(e)}")
@@ -413,12 +418,12 @@ def scan_semgrep(scan_path: str) -> dict[str, Any]:
     else:
         return {"error": result["stderr"]}
 
-async def a_stupid_wrapper(identity: str, awaitable_task: Awaitable) -> tuple[str, Any | Exception]:
+async def a_stupid_wrapper(sub_path: str, identity: str, awaitable_task: Awaitable) -> tuple[str, Any | Exception]:
     try:
         result = await awaitable_task
-        return identity, result
+        return sub_path, identity, result
     except Exception as e:
-        return identity, e
+        return sub_path, identity, e
 
 def _parse_slither_result(slither_result: dict[str, Any]) -> list[Report]:
     """Parse raw Slither JSON results and convert to Report objects."""

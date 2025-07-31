@@ -18,7 +18,7 @@ diff_mcp = FastMCP("Sentinel - Diff Analysis Agent", dependencies=["gitpython"])
 @audit_mcp.tool(
     description="Perform a comprehensive security scan of a GitHub repository and get the report. Can scan a specific subfolder or individual file within the repository.",
     annotations={
-        "github_repo": "Github repository to scan. Can be local path or github url.",
+        "github_repo": "Github repository to scan. It can be local path or github url.",
         "paths": "Specific paths to scan. By default, all detected files/folders are scanned.",
         "branch_name": "Specify the branch to scan. Use None as default branch.",
         "mode": "The mode to scan the repository in. 'full' mode scans all files/folders, 'working' scans only the working tree changes. For quick scans, use working mode",

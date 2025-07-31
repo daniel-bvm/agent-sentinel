@@ -241,11 +241,13 @@ async def confirm_report(report: Report, confirmed_reports: list[Report], deep_m
         logger.info(f"Dependency report is no need to be confirmed again")
         return report
 
+    print(repo)
+
     context = repo.reveal_content(
         report.file_path,
         report.line_start,
         report.line_end,
-        A=2, B=2
+        A=4, B=4
     )
 
     if not context:
@@ -996,9 +998,10 @@ async def handoff(
                 repo_url = f'/{repo_url}'
 
             repo_path, sub_dir = detect_github_repo(repo_url)
+            print('DEBUG', repo_path, sub_dir)
 
             if repo_path:
-                tool_args['github_repo'] = repo_path
+                tool_args['github_repo'] = repo_url = repo_path
 
             if sub_dir:
                 tool_args['paths'].append(sub_dir)
@@ -1006,7 +1009,10 @@ async def handoff(
         elif not repo_url.startswith("http"):
             repo_url = f"https://github.com/{repo_url.lstrip('/')}"
 
-        repo = RepoInfo(clone_repo(repo_url, tool_args.get('branch', None)))
+        print('DEBUG 0', repo_url, tool_args.get('branch', None))
+        repo_path = clone_repo(repo_url, tool_args.get('branch', None))
+        print('DEBUG 1', repo_path)
+        repo = RepoInfo(repo_path)
 
     if not repo:
         yield wrap_chunk(random_uuid(), f"Repository is invalid or not accessible. No security scan is performed.", "assistant")
@@ -1080,7 +1086,32 @@ async def handle_request(
 
     messages: list[dict[str, Any]] = refine_chat_history(messages, system_prompt, arm)
 
-    oai_tools = await list_toolcalls()
+    oai_tools = [
+        {
+            'type': 'function', 
+            'function': {
+                'name': 'security_scan', 
+                'description': 'Perform a comprehensive security scan of a GitHub repository and get the report. Can scan a specific subfolder or individual file within the repository.', 
+                'parameters': {
+                    'properties': {
+                        'github_repo': {
+                            'title': 'Github repository to scan. It can be local path or github url.', 'type': 'string'
+                        }, 
+                        'paths': {
+                            'default': [], 
+                            'items': {'type': 'string'}, 
+                            'title': 'Specific paths to scan. By default, all detected files/folders are scanned.', 
+                            'type': 'array'
+                        }, 
+                        'branch_name': {'anyOf': [{'type': 'string'}, {'type': 'null'}], 'default': None, 'title': 'Specify the branch to scan. Use None as default branch.'}, 
+                        'mode': {'default': 'full', 'enum': ['working', 'full'], 'title': 'The mode to scan the repository in. \'full\' mode scans all files/folders, \'working\' scans only the working tree changes. For quick scans, use working mode', 'type': 'string'}, 
+                        'deep': {'default': True, 'title': 'Perform extra scans on the source code. Deep mode takes more time to run.', 'type': 'boolean'}
+                    }, 
+                    'required': ['github_repo'], 'type': 'object'
+                }
+            }
+        }
+    ]
 
     finished = False
     n_calls, max_calls = 0, 25
