@@ -1,0 +1,254 @@
+/* PDF Report Styling */
+
+
+/* General body styling for PDF output */
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+    color: #333;
+    margin: 0;
+    padding: 20px;
+    padding-bottom: 40px;
+    /* Space for wkhtmltopdf footer */
+    font-size: 12px;
+    background-color: #fff;
+}
+
+
+/* Header section styling */
+
+.header {
+    text-align: left;
+    padding: 5px 0;
+    margin-bottom: 10px;
+    border-bottom: 2px solid #e0e0e0;
+    background-color: #f8f9fa;
+}
+
+.header h1,
+.header h2,
+.header h3 {
+    margin: 0;
+    color: #2c3e50;
+}
+
+.header p {
+    margin: 5px 0;
+    color: #666;
+    font-style: italic;
+}
+
+
+/* Main content area styling */
+
+.content {
+    min-height: 500px;
+    padding: 20px 0;
+    margin-bottom: 30px;
+}
+
+
+/* Footer section styling */
+
+.footer {
+    text-align: center;
+    padding: 5px 0;
+    margin-top: 10px;
+    border-top: 1px solid #e0e0e0;
+    background-color: #f8f9fa;
+    font-size: 10px;
+    color: #666;
+    page-break-inside: avoid;
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+}
+
+
+/* Markdown content styling */
+
+.markdown-body {
+    max-width: 100%;
+    margin: 0 auto;
+    padding: 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+    color: #2c3e50;
+    margin-top: 24px;
+    margin-bottom: 16px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.markdown-body h1 {
+    font-size: 24px;
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 8px;
+}
+
+.markdown-body h2 {
+    font-size: 20px;
+    border-bottom: 1px solid #e0e0e0;
+    padding-bottom: 6px;
+}
+
+.markdown-body h3 {
+    font-size: 16px;
+}
+
+.markdown-body h4 {
+    font-size: 14px;
+}
+
+.markdown-body h5,
+.markdown-body h6 {
+    font-size: 12px;
+}
+
+.markdown-body p {
+    margin-bottom: 16px;
+    text-align: justify;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+    margin-bottom: 16px;
+    padding-left: 20px;
+}
+
+.markdown-body li {
+    margin-bottom: 4px;
+}
+
+.markdown-body blockquote {
+    margin: 16px 0;
+    padding: 0 16px;
+    border-left: 4px solid #3498db;
+    background-color: #f8f9fa;
+    color: #666;
+}
+
+.markdown-body code {
+    background-color: #f1f2f6;
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px;
+    color: #c7254e;
+}
+
+.markdown-body pre {
+    background-color: #f8f9fa;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 12px;
+    overflow-x: auto;
+    margin-bottom: 16px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.markdown-body pre code {
+    background-color: transparent;
+    padding: 0;
+    border-radius: 0;
+    color: #333;
+}
+
+.markdown-body table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 16px;
+    font-size: 11px;
+}
+
+.markdown-body th,
+.markdown-body td {
+    padding: 8px 12px;
+    text-align: left;
+    border: 1px solid #e0e0e0;
+}
+
+.markdown-body th {
+    background-color: #f8f9fa;
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.markdown-body tr:nth-child(even) {
+    background-color: #f8f9fa;
+}
+
+.markdown-body hr {
+    border: none;
+    border-top: 1px solid #e0e0e0;
+    margin: 24px 0;
+}
+
+.markdown-body strong,
+.markdown-body b {
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.markdown-body em,
+.markdown-body i {
+    font-style: italic;
+    color: #555;
+}
+
+
+/* PDF-specific styling */
+
+@media print {
+    body {
+        margin: 0;
+        padding: 0;
+    }
+    .header,
+    .footer {
+        background-color: transparent !important;
+    }
+    .markdown-body pre {
+        page-break-inside: avoid;
+    }
+    .markdown-body h1,
+    .markdown-body h2,
+    .markdown-body h3 {
+        page-break-after: avoid;
+    }
+    .markdown-body table {
+        page-break-inside: avoid;
+    }
+}
+
+
+/* Utility classes */
+
+.text-center {
+    text-align: center;
+}
+
+.text-right {
+    text-align: right;
+}
+
+.text-left {
+    text-align: left;
+}
+
+.page-break {
+    page-break-before: always;
+}
+
+.no-break {
+    page-break-inside: avoid;
+}
