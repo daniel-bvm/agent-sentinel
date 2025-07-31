@@ -184,7 +184,6 @@ async def comprehensive_security_scan_concurrent(
 
     # Clone the repository and checkout branch if specified
     repo_path = await sync2async(clone_repo)(repo_url, branch_name)
-    print('DEBUG: repo_path', repo_path)
 
     if mode != 'full':
         logger.info(f"Scanning repository {repo_url} with mode {mode}; original paths ({paths}) is skipped")
@@ -195,7 +194,7 @@ async def comprehensive_security_scan_concurrent(
         paths = [
             file for file in diff_file_changes
         ]
-        
+
     elif not paths:
         paths.append(repo_path)
 
@@ -204,7 +203,6 @@ async def comprehensive_security_scan_concurrent(
             os.path.join(repo_path, path) 
             for path in paths
         ]
-    
 
     for scan_path in paths:
         is_single_file = os.path.isfile(scan_path)

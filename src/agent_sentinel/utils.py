@@ -100,13 +100,13 @@ def detect_project_languages(path: str) -> list[str]:
     else:
         # Directory detection (original logic)
         for root, dirs, files in os.walk(path):
-        # Skip hidden directories and git directories
+            # Skip hidden directories and git directories
             dirs[:] = [d for d in dirs if not d.startswith('.')]
 
-        for file in files:
-                language = detect_language_from_file(file)
-                if language:
-                    languages.append(language)
+            for file in files:
+                    language = detect_language_from_file(file)
+                    if language:
+                        languages.append(language)
 
     return list(set(languages))
 

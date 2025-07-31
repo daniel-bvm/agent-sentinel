@@ -14,20 +14,25 @@ logger = logging.getLogger(__name__)
 
 def detect_github_repo(path: str) -> tuple[str, str | None]:
     # the path can be a sub-path of a github repo
-    parts = os.path.normpath(path).split(os.path.sep)
+    parts = os.path.split(os.path.normpath(path))
 
-    for i in reversed(list(range(len(parts)))):
-        if os.path.exists(os.path.join(parts[:i], ".git")):
-            return os.path.join(parts[:i]), os.path.join(parts[i:]) if i < len(parts) - 1 else None
+    for i in reversed(list(range(len(parts) + 1))):
+        if os.path.exists(os.path.join(*parts[:i], ".git")):
+            return (
+                os.path.join(*parts[:i]), 
+                os.path.join(*parts[i:]) if i < len(parts) - 1 else None
+            )
 
     return None, None
     
-def prepare_repo(path: str, branch_name: str | None = None, remove_on_error: bool = False) -> str:
+def prepare_repo(path: str, branch_name: str | None = None, remove_on_error: bool = False, pull: bool = True) -> str:
     repo = git.Repo(path)
 
     if not repo.bare:
         origin = repo.remotes.origin
-        origin.pull()
+
+        if pull:
+            origin.pull()
 
         # Checkout the specified branch if provided
         if branch_name:
@@ -46,6 +51,7 @@ def prepare_repo(path: str, branch_name: str | None = None, remove_on_error: boo
                 # Clean up on error and re-clone
                 if remove_on_error:
                     shutil.rmtree(path, ignore_errors=True)
+
                 raise Exception(f"Failed to checkout branch '{branch_name}': {str(e)}")
 
         return path
@@ -53,7 +59,7 @@ def prepare_repo(path: str, branch_name: str | None = None, remove_on_error: boo
 def clone_repo(repo_url: str, branch_name: str = None) -> str:
     if not repo_url.startswith("http") and os.path.exists(repo_url):
         try:
-            return prepare_repo(repo_url, branch_name, remove_on_error=False)
+            return prepare_repo(repo_url, None, remove_on_error=False, pull=False)
         except Exception as e:
             logger.warning(f"Failed to initialize repository: {e}")
             return None

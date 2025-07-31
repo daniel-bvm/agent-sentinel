@@ -975,31 +975,36 @@ async def handoff(
     fn = fn_mapping[tool_name]
     confirmed_reports = []
     deep_mode = tool_args.get('deep', True)
-    repo_url = tool_args.get('github_repo', None)
+    repo_url: str | None = tool_args.get('github_repo', None)
     tool_args.setdefault('paths', [])
     
     if not isinstance(tool_args['paths'], list):
         logger.warning(f"Paths is not a list, converting to list: {tool_args['paths']}")
         
         if not isinstance(tool_args['paths'], str):
-            logger.warning(f"Paths is not a string, converting to string: {tool_args['paths']}")
+            logger.warning(f"Paths is not a string: {tool_args['paths']} (ignoring)")
             tool_args['paths'] = []
         
         else:
             tool_args['paths'] = [tool_args['paths']]
         
-
     repo = None
 
     if repo_url is not None:
-        if not repo_url.startswith("http") and os.path.exists(repo_url):
+        if not repo_url.startswith("http") and (os.path.exists(repo_url) or os.path.exists(f'/{repo_url}')):
+            if not os.path.exists(repo_url) and os.path.exists(f'/{repo_url}'):
+                repo_url = f'/{repo_url}'
+
             repo_path, sub_dir = detect_github_repo(repo_url)
-            
+
             if repo_path:
-                repo_url = repo_path
+                tool_args['github_repo'] = repo_path
 
             if sub_dir:
-                tool_args['paths'].extend(sub_dir)
+                tool_args['paths'].append(sub_dir)
+
+        elif not repo_url.startswith("http"):
+            repo_url = f"https://github.com/{repo_url.lstrip('/')}"
 
         repo = RepoInfo(clone_repo(repo_url, tool_args.get('branch', None)))
 
@@ -1080,7 +1085,18 @@ async def handle_request(
     finished = False
     n_calls, max_calls = 0, 25
 
-    user_message = messages[-1].get("content", "")
+    user_messages = get_user_messages(messages, last_n=3)
+
+    user_message = ''
+    
+    for message in user_messages:
+        lines = message.split('\n')
+
+        if len(lines) > 6:
+            user_message += '\n'.join(lines[:2] + [f'... ({len(lines) - 4} more lines truncated)'] + lines[-2:])
+
+        else:
+            user_message += '\n'.join(lines)
 
     while not finished and not event.is_set():
         completion_builder = ChatCompletionResponseBuilder()
