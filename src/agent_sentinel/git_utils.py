@@ -16,9 +16,9 @@ def detect_github_repo(path: str) -> tuple[str, str | None]:
     # the path can be a sub-path of a github repo
     parts = os.path.normpath(path).split(os.path.sep)
 
-    for i in range(len(parts)):
+    for i in reversed(list(range(len(parts)))):
         if os.path.exists(os.path.join(parts[:i], ".git")):
-            return os.path.join(parts[:i], ".git"), parts[i:] if i < len(parts) - 1 else None
+            return os.path.join(parts[:i]), os.path.join(parts[i:]) if i < len(parts) - 1 else None
 
     return None, None
     
