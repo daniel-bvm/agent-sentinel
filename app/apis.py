@@ -3,8 +3,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from app.oai_models import ChatCompletionRequest, APIStatus, ResponseMessage, ChatCompletionAdditionalParameters, ChatTemplate, ChatCompletionStreamResponse
 
 import logging
-from pydantic import BaseModel
-from typing import Any, Optional, AsyncGenerator
+from typing import Optional, AsyncGenerator
 import asyncio
 import time
 from app.configs import settings

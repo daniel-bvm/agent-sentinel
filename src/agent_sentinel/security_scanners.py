@@ -269,7 +269,9 @@ async def comprehensive_security_scan_concurrent(
                     reports = post_processor(result)
 
                     for report in reports:
-                        report.file_path = os.path.relpath(os.path.join(sub_path, report.file_path), repo_path)
+                        if report.file_path is not None:
+                            report.file_path = os.path.relpath(os.path.join(sub_path, report.file_path), repo_path)
+
                         logger.info(f"Report file path: {report.file_path}")
                         yield report
 

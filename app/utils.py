@@ -326,6 +326,7 @@ def refine_mcp_response(something: Any, arm: AgentResourceManager, skip_embed_re
             (
                 ("agent_message", True),
                 ("think", False),
+                ("files", False),
                 ("details", False),
                 ("action", False)
             )
@@ -393,6 +394,7 @@ def refine_chat_history(messages: list[dict[str, str]], system_prompt: str, arm:
                     (
                         ("agent_message", False),
                         ("think", False),
+                        ("files", False),
                         ("details", False),
                         ("action", False)
                     )
@@ -429,6 +431,7 @@ def refine_assistant_message(
                 ("agent_message", False),
                 ("think", False),
                 ("details", False),
+                ("files", False),
                 ("img", False),
                 ("action", False)
             )
@@ -584,7 +587,7 @@ def create_rich_user_message(message: str, arm: AgentResourceManager) -> dict[st
         message,
         (
             ("img", False),
-            ("file", False),
+            ("files", False),
             ("data", False)
         )
     )
