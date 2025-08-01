@@ -43,8 +43,8 @@ async def get_system_prompt(messages: list[ChatCompletionMessageParam] | list[di
         with open("system_prompt.txt", "r") as f:
             base = f.read()
 
-    github_repo_pattern = re.compile(r'https://github\.com/[^/]+/[^/]+')
-    user_message = '\n'.join(last_3_messages)
+    github_repo_pattern = re.compile(r'https://github\.com/[^/\s]+/[^/\s]+')
+    user_message = "".join(last_3_messages)
 
     found_repo = github_repo_pattern.findall(user_message)
     repo_info_str = ''
@@ -83,6 +83,7 @@ async def get_system_prompt(messages: list[ChatCompletionMessageParam] | list[di
 
 from src.agent_sentinel import mcp as git_action_mcp, audit_mcp as source_code_mcp, diff_mcp as diff_analysis_mcp, main as security_scanners
 from src.agent_sentinel.utils import merge_reports, Report, ErrorReport, SeverityLevel
+from src.agent_sentinel.models import ScanNoti
 from src.agent_sentinel.git_utils import RepoInfo, clone_repo, get_directory_tree
 from src.agent_sentinel.cwe_utils import get_cwe_by_id, CWEWeakness
 import openai
@@ -464,7 +465,14 @@ def generate_chart_markdown(df: DataFrame, chart_type: str, x_axis: str, y_axis:
         logger.error(f"Error generating chart: {e}", exc_info=True)
         return f"Error generating chart: {str(e)}"
 
-async def generate_headline(df: DataFrame, repo: RepoInfo | None, arm: AgentResourceManager, event: asyncio.Event, user_message: str) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
+async def generate_headline(
+    df: DataFrame, 
+    repo: RepoInfo | None, 
+    arm: AgentResourceManager, 
+    event: asyncio.Event, 
+    user_message: str, 
+    notifications: list[str] = []
+) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     """Generate executive summary and overview of the security scan results."""
 
     total_issues = len(df)
@@ -486,6 +494,8 @@ async def generate_headline(df: DataFrame, repo: RepoInfo | None, arm: AgentReso
         for cwe_id, _ in top5_cwes
     ]
 
+    system_noti = "\n".join(notifications)
+
     # Create context for LLM
     context = {
         "total_issues": total_issues,
@@ -498,7 +508,8 @@ async def generate_headline(df: DataFrame, repo: RepoInfo | None, arm: AgentReso
             if cwe is not None
         ],
         "repo_url": repo.repo_url if repo else "Unknown",
-        "data_preview": df.head(5).to_json(orient="records")
+        "data_preview": df.head(5).to_json(orient="records"),
+        "system_noti": system_noti
     }
 
     system_prompt = f"""You are a cybersecurity expert creating an executive summary for a security scan report.
@@ -513,6 +524,7 @@ Scan Results Context:
 - Languages Scanned: {', '.join(context['languages_scanned'])}
 - Top CWEs: {', '.join(context['top_cwes'])}
 - Repository: {context['repo_url']}
+- Confirmations: {context['system_noti'] or "None."}
 
 Create a professional executive summary that:
 1. Starts with a clear headline and security status
@@ -563,6 +575,8 @@ Guidelines:
         ]
     })
 
+    yield wrap_chunk(random_uuid(), f"\n\n", "assistant")
+
 async def generate_high_severity_report(
     df: DataFrame,
     repo: RepoInfo | None,
@@ -611,9 +625,12 @@ async def generate_other_severity_report(
     repo: RepoInfo | None,
     arm: AgentResourceManager,
     event: asyncio.Event,
-    user_message: str
+    user_message: str,
+    notifications: list[str] = []
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     """Generate summary report for LOW severity and other issues."""
+
+    system_noti = "\n".join(notifications)
 
     other_df = df[~df['severity'].isin(['CRITICAL', 'HIGH', 'MEDIUM'])]
     yield wrap_chunk(random_uuid(), f"\n## 🟢 Low Severity & Other Issues ({len(other_df)} found)\n\n", "assistant")
@@ -631,7 +648,6 @@ async def generate_other_severity_report(
 
         count = row['count']
         files = row['file_path']
-        examples = row['description']
 
         # Get CWE information
         cwe_info = get_cwe_by_id(cwe_id)
@@ -657,7 +673,14 @@ async def generate_other_severity_report(
     if not event.is_set() and len(other_df) > 0:
         yield wrap_chunk(random_uuid(), "\n### 💡 Next Steps\n\n", "assistant")
 
-        async for chunk in _generate_low_priority_recommendations(other_df, repo, arm, event, user_message):
+        async for chunk in _generate_low_priority_recommendations(
+            other_df, 
+            repo, 
+            arm, 
+            event, 
+            user_message,
+            system_noti
+        ):
             if event.is_set():
                 break
             yield chunk
@@ -667,7 +690,8 @@ async def _generate_low_priority_recommendations(
     repo: RepoInfo | None,
     arm: AgentResourceManager,
     event: asyncio.Event,
-    user_message: str
+    user_message: str,
+    system_noti: str = ""
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     """Generate LLM recommendations for low priority security issues."""
 
@@ -712,6 +736,9 @@ async def _generate_low_priority_recommendations(
 
 User Message:
 {user_message}
+
+Extra confirmations:
+{system_noti if system_noti else "None."}
 
 ## Summary
 - **Total low priority issues:** {total_issues}
@@ -904,6 +931,7 @@ Keep your response focused, practical, and include code examples where relevant.
 
         if chunk.choices[0].delta.content:
             yield chunk
+
     yield wrap_chunk(random_uuid(), "\n---\n\n", "assistant")
     
 def to_df(confirmed_reports: list[Report]) -> DataFrame:
@@ -933,7 +961,8 @@ async def generate_security_deep_report(
     event: asyncio.Event,
     repo: RepoInfo | None = None,
     deep: bool=True,
-    user_message: str = ""
+    user_message: str = "",
+    notifications: list[str] = []
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     # Repo object is now passed as parameter
 
@@ -948,7 +977,7 @@ async def generate_security_deep_report(
     medium_severity_df = df[df['severity'] == 'MEDIUM']
     other_df = df[~df['severity'].isin(['CRITICAL', 'HIGH', 'MEDIUM'])]
 
-    async for chunk in generate_headline(df, repo, arm, event, user_message):
+    async for chunk in generate_headline(df, repo, arm, event, user_message, notifications):
         yield chunk
 
     if not deep:
@@ -963,7 +992,7 @@ async def generate_security_deep_report(
             yield chunk
 
     if len(other_df) > 0:
-        async for chunk in generate_other_severity_report(other_df, repo, arm, event, user_message):
+        async for chunk in generate_other_severity_report(other_df, repo, arm, event, user_message, notifications):
             yield chunk
 
 async def handoff(
@@ -993,8 +1022,9 @@ async def handoff(
         
         else:
             tool_args['paths'] = [tool_args['paths']]
-        
+
     repo = None
+    notifications = []
 
     if repo_url is not None:
         if not repo_url.startswith("http") and (os.path.exists(repo_url) or os.path.exists(f'/{repo_url}')):
@@ -1025,15 +1055,23 @@ async def handoff(
 
     yield wrap_chunk(random_uuid(), f"<details><summary>Start scanning repository {repo_url} with configs</summary>\n```json\n{json.dumps(tool_args, indent=2)}\n```\n</details>\n", "assistant")
 
+    executed_tools = set({})
+    tools_w_confirmed_reports = set({})
+
     async for report in fn(**tool_args):
         if event.is_set():
             logger.info(f"[toolcall] Event signal received, stopping...")
             return
 
-        report: Report | ErrorReport
+        report: Report | ErrorReport | ScanNoti
 
         if isinstance(report, ErrorReport):
             logger.warning(f"Error report: {report}")
+            notifications.append(f"Error: {report.reason} ({report.tool})")
+
+        elif isinstance(report, ScanNoti):
+            logger.warning(f"Scan notification: {report}")
+            executed_tools.add(report.tool if not report.tool.startswith("codeql_") else "codeql")
 
         else:
             report: Report | None = await confirm_report(report, confirmed_reports, deep_mode, repo)
@@ -1042,6 +1080,7 @@ async def handoff(
                 continue
 
             confirmed_reports.append(report)
+            tools_w_confirmed_reports.add(report.tool if not report.tool.startswith("codeql_") else "codeql")
 
             yield wrap_chunk(
                 random_uuid(),
@@ -1064,7 +1103,25 @@ async def handoff(
     pdf.add_component(PdfTitle("Security Report"))
     detail_report = ''
 
-    async for chunk in generate_security_deep_report(confirmed_reports, arm, event, repo, deep_mode, user_message):
+    notifications.append(
+        "{tool} did not detect any vulnerabilities.".format(
+            tool=", ".join(
+                tool 
+                for tool in executed_tools 
+                if tool not in tools_w_confirmed_reports
+            )
+        )
+    )
+
+    async for chunk in generate_security_deep_report(
+        confirmed_reports, 
+        arm, 
+        event, 
+        repo, 
+        deep_mode, 
+        user_message,
+        notifications[-5:]
+    ):
         yield chunk
  
         if isinstance(chunk, ChatCompletionStreamResponse):

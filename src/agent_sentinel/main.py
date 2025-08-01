@@ -5,7 +5,7 @@ import logging
 from typing import AsyncGenerator
 
 from . import security_scanners
-from .security_scanners import Report, ErrorReport
+from .security_scanners import Report, ErrorReport, ScanNoti
 from typing import Literal
 import os
 
@@ -31,7 +31,7 @@ async def security_scan(
     branch_name: str | None = None,
     mode: Literal["working", "full"] = "full",
     deep: bool = True
-) -> AsyncGenerator[Report | ErrorReport, None]:
+) -> AsyncGenerator[Report | ErrorReport | ScanNoti, None]:
 
     if not github_repo.startswith("http") and not os.path.exists(github_repo):
         github_repo = f"https://github.com/{github_repo}"

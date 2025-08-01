@@ -19,7 +19,7 @@ from collections import defaultdict
 from .git_utils import clone_repo
 from .codeql_utils import run_codeql_scanner
 from .trivy_utils import scan_with_trivy
-from .models import cwe_mapping, Report, ErrorReport, SeverityLevel
+from .models import cwe_mapping, Report, ErrorReport, SeverityLevel, ScanNoti
 from .diff_utils import scan_git_diff
 
 logger = logging.getLogger(__name__)
@@ -181,7 +181,7 @@ async def comprehensive_security_scan_concurrent(
     branch_name: str = None,
     mode: Literal["full", "working", "staged", "unstaged"] = "full",
     deep: bool = True
-) -> AsyncGenerator[Report | ErrorReport, None]:
+) -> AsyncGenerator[Report | ErrorReport | ScanNoti, None]:
 
     # Clone the repository and checkout branch if specified
     repo_path = await sync2async(clone_repo)(repo_url, branch_name)
@@ -206,7 +206,6 @@ async def comprehensive_security_scan_concurrent(
         ]
 
     repo_path = os.path.normpath(repo_path)
-    task_map_identity = {} # map id with the scan path
     tasks = []
 
     for scan_path in paths:
@@ -228,32 +227,40 @@ async def comprehensive_security_scan_concurrent(
                 if mythril_check["success"]:
                     # Mythril can handle individual files
                     tasks.append(a_stupid_wrapper(scan_path, "mythril", sync2async(scan_solidity_mythril)(scan_path)))
+                    yield ScanNoti(tool="mythril", msg="Mythril scan started.")
                 else:
                     logger.warning("Mythril not available for deep analysis, falling back to Slither")
                     # Slither needs directory
                     slither_path = scan_dir if is_single_file else scan_path
                     tasks.append(a_stupid_wrapper(slither_path, "slither", sync2async(scan_solidity_slither)(slither_path)))
+                    yield ScanNoti(tool="slither", msg="Slither scan started.")
             else:
                 # Use Slither for faster analysis when deep=False - Slither needs directory
                 slither_path = scan_dir if is_single_file else scan_path
                 tasks.append(a_stupid_wrapper(slither_path, "slither", sync2async(scan_solidity_slither)(slither_path)))
+                yield ScanNoti(tool="slither", msg="Slither scan started.")
 
         # Schedule general security scans (these can handle files directly)
         tasks.append(a_stupid_wrapper(scan_path, "secrets", sync2async(scan_secrets_with_gitleaks)(scan_path)))
+        yield ScanNoti(tool="secrets", msg="Secrets scan started.")
+
         tasks.append(a_stupid_wrapper(scan_path, "semgrep", sync2async(scan_semgrep)(scan_path)))
+        yield ScanNoti(tool="semgrep", msg="Semgrep scan started.")
 
         # Schedule CodeQL analysis for each language (CodeQL needs directory)
         for language in languages:
             codeql_path = scan_dir if is_single_file else scan_path
             tasks.append(a_stupid_wrapper(codeql_path, f"codeql_{language}", sync2async(run_codeql_scanner)(codeql_path, language)))
+            yield ScanNoti(tool=f"codeql_{language}", msg=f"CodeQL scan started for {language}.")
 
         # Schedule Trivy scan (can handle files directly)
         tasks.append(a_stupid_wrapper(scan_path, "trivy", sync2async(scan_with_trivy)(scan_path)))
+        yield ScanNoti(tool="trivy", msg="Trivy scan started.")
 
     # Process completed tasks as they finish
     for task in asyncio.as_completed(tasks):
         sub_path, identity, result = await task
-
+        
         # Handle CodeQL results (which have language suffix)
         if identity.startswith("codeql_"):
             language = identity.replace("codeql_", "")
@@ -282,7 +289,6 @@ async def comprehensive_security_scan_concurrent(
         else:
             logger.warning(f"No post-processor found for {identity}")
             yield ErrorReport(tool=identity, reason="no_post_processor")
-
 
 def clean_file_path(file_path: str, repo_path: str) -> str:
     """
