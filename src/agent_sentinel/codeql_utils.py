@@ -258,7 +258,7 @@ def run_codeql_scanner(scan_path: str, language: str) -> list[Report]:
         # Clean up generated files after successful parsing
         if database_path and os.path.exists(database_path):
             try:
-                shutil.rmtree(database_path)
+                shutil.rmtree(database_path, ignore_errors=True)
                 logger.info(f"Cleaned up CodeQL database: {database_path}")
             except Exception as cleanup_error:
                 logger.warning(f"Failed to clean up CodeQL database {database_path}: {cleanup_error}")
@@ -277,7 +277,7 @@ def run_codeql_scanner(scan_path: str, language: str) -> list[Report]:
         # Clean up on parsing failure
         if database_path and os.path.exists(database_path):
             try:
-                shutil.rmtree(database_path)
+                shutil.rmtree(database_path, ignore_errors=True)
                 logger.info(f"Cleaned up CodeQL database after parsing failure: {database_path}")
             except Exception as cleanup_error:
                 logger.warning(f"Failed to clean up CodeQL database {database_path}: {cleanup_error}")
