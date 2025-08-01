@@ -1100,7 +1100,7 @@ async def handoff(
         filtered_df.to_csv(f"{tempdir}/report.csv", index=False)
         yield wrap_chunk(
             random_uuid(), 
-            f"<files>{construct_file_response([f'{tempdir}/report.html', f'{tempdir}/report.csv'])}</files>", 
+            construct_file_response([f'{tempdir}/report.html', f'{tempdir}/report.csv']), 
             "assistant"
         )
 
