@@ -1092,7 +1092,6 @@ async def handoff(
         yield wrap_chunk(random_uuid(), f"Repository is well-secured, no issues found!", "assistant")
         return
 
-    yield FullyHandoff()
 
     pdf = PdfFactory(
         header_text="Eternal AI",
@@ -1103,15 +1102,22 @@ async def handoff(
     pdf.add_component(PdfTitle("Security Report"))
     detail_report = ''
 
-    notifications.append(
-        "{tool} did not detect any vulnerabilities.".format(
+    if any(
+        tool not in tools_w_confirmed_reports
+        for tool in executed_tools
+    ):
+        noti = "{tool} did not find any vulnerabilities.".format(
             tool=", ".join(
                 tool 
                 for tool in executed_tools 
                 if tool not in tools_w_confirmed_reports
             )
         )
-    )
+
+        notifications.append(noti)
+        yield wrap_chunk(random_uuid(), f"<details><summary>Happy news!</summary>\n{noti}\n</details>\n", "assistant")
+
+    yield FullyHandoff()
 
     async for chunk in generate_security_deep_report(
         confirmed_reports, 
