@@ -264,7 +264,6 @@ def _convert_sonarqube_summary_to_reports(summary: dict) -> list[Report]:
             line_number=line_number,
             language=language,
             cwe=cwe,
-            information=rule_key,  # Add rule key as information
             report_type="code"
         )
 
