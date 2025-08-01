@@ -252,3 +252,48 @@ body {
 .no-break {
     page-break-inside: avoid;
 }
+
+.pdf-markdown-wrapper {
+    font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    font-size: 14px;
+    color: #333;
+    background: white;
+    padding: 20px;
+}
+
+
+/* Markdown body */
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+    border-bottom: 1px solid #eee;
+    padding-bottom: 0.3em;
+    margin-top: 1.5em;
+}
+
+.markdown-body code {
+    background: #f6f8fa;
+    padding: 2px 4px;
+    font-size: 90%;
+    border-radius: 4px;
+}
+
+.markdown-body pre {
+    background: #f6f8fa;
+    padding: 10px;
+    overflow-x: auto;
+    border-radius: 4px;
+}
+
+
+/* Code blocks from `codehilite` */
+
+.codehilite {
+    background: #f6f8fa;
+    border: 1px solid #ddd;
+    padding: 10px;
+    border-radius: 5px;
+    overflow-x: auto;
+}

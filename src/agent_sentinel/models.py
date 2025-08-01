@@ -421,3 +421,15 @@ class ErrorReport(Report):
         result["reason"] = self.reason
         return result
 
+class ScanNoti:
+    """
+    Represents a scan notification.
+    """
+
+    def __init__(
+        self,
+        tool: str,
+        msg: str
+    ):
+        self.tool = tool
+        self.msg = msg

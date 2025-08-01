@@ -127,7 +127,7 @@ class PdfMarkDownBody(PdfComponent):
         self.content = content
 
     def render(self) -> str:
-        return f"<div class='markdown-body'>{markdown.markdown(self.content, extensions=['fenced_code', 'codehilite'])}</div>" 
+        return f"<div class='markdown-body'>{markdown.markdown(self.content, extensions=['fenced_code', 'codehilite'], tab_length=4)}</div>" 
 
 class PdfFactory:
     def __init__(self, header_text: str | None = None, footer_text: str | None = None, page_number: bool = True) -> None:
