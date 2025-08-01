@@ -28,6 +28,7 @@ SONARQUBE_SEVERITY_MAPPING = {
     "INFO": SeverityLevel.LOW
 }
 
+
 def _run_with_live_output(cmd):
     process = subprocess.Popen(
         cmd,
@@ -100,10 +101,10 @@ def _get_sonarqube_token(
     token_name = f"token-{uuid.uuid4()}"
     try:
         response = requests.post(
-        f"{SONARQUBE_URL}/api/user_tokens/generate",
-        data={"name": token_name},
-        auth=(user, password),
-    )
+            f"{SONARQUBE_URL}/api/user_tokens/generate",
+            data={"name": token_name},
+            auth=(user, password),
+        )
         if response.status_code == 200:
             token = response.json()["token"]
             os.environ["SONARQUBE_TOKEN"] = token
@@ -167,7 +168,8 @@ def _summarize_sonar_scanner_result(sonar_scanner_result_path: str) -> dict:
                 "message": issue.get("message", ""),
                 "severity": issue.get("severity", ""),
                 "line": (
-                    f"From {issue.get('textRange', {}).get('startLine', 0)} to {issue.get('textRange', {}).get('endLine', 0)}"
+                    f"From {issue.get('textRange', {}).get('startLine', 0)} to "
+                    f"{issue.get('textRange', {}).get('endLine', 0)}"
                     if _is_text_range_different(issue)
                     else issue.get("line", 0)
                 ),
@@ -210,7 +212,6 @@ def _convert_sonarqube_summary_to_reports(summary: dict) -> list[Report]:
         if isinstance(line_info, str) and line_info.strip():
             if line_info.startswith("From ") and " to " in line_info:
                 # Extract range like "From 10 to 20"
-                import re
                 match = re.search(r'From (\d+) to (\d+)', line_info)
                 if match:
                     start_line, end_line = match.groups()
@@ -309,9 +310,9 @@ def scan_project_with_sonar_scanner(project_path: str) -> list[Report]:
             tool="SonarQube",
             reason=f"Sonar Scanner failed: {e}"
         )]
-    logger.info(f"Finish running Sonar Scanner")
+    logger.info("Finish running Sonar Scanner")
 
-    logger.info(f"Getting Sonar Scanner result...")
+    logger.info("Getting Sonar Scanner result...")
     result = _get_sonar_scanner_result(project_key)
     logger.info(f"Result: {result}")
     if not result:
@@ -322,14 +323,40 @@ def scan_project_with_sonar_scanner(project_path: str) -> list[Report]:
         )]
     Path(SONAR_SCANNER_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
     json_path = Path(SONAR_SCANNER_OUTPUT_DIR) / f"{project_key}.json"
-    with open(json_path, "w") as f:
-        json.dump(result, f)
 
-    summary = _summarize_sonar_scanner_result(json_path)
+    try:
+        with open(json_path, "w") as f:
+            json.dump(result, f)
 
-    # TODO: Check why the stop scanner command takes too long?
-    # stop_sonarqube()
+        summary = _summarize_sonar_scanner_result(json_path)
 
-    # Convert summary to list of Report objects
-    return _convert_sonarqube_summary_to_reports(summary)
+        # TODO: Check why the stop scanner command takes too long?
+        # stop_sonarqube()
 
+        # Convert summary to list of Report objects
+        reports = _convert_sonarqube_summary_to_reports(summary)
+
+        # Clean up the JSON result file after processing
+        if json_path.exists():
+            try:
+                json_path.unlink()
+                logger.info(f"Cleaned up SonarQube result file: {json_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to clean up SonarQube result file {json_path}: {cleanup_error}")
+
+        return reports
+
+    except Exception as e:
+        logger.error(f"Error processing SonarQube results: {e}")
+        # Clean up on error
+        if json_path.exists():
+            try:
+                json_path.unlink()
+                logger.info(f"Cleaned up SonarQube result file after error: {json_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to clean up SonarQube result file {json_path}: {cleanup_error}")
+
+        return [ErrorReport(
+            tool="SonarQube",
+            reason=f"Error processing results: {str(e)}"
+        )]

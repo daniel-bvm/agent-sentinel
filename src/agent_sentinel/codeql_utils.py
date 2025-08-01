@@ -1,7 +1,6 @@
 import json
 import json_repair
 import logging
-from collections import defaultdict
 import subprocess
 import os
 from threading import Lock
@@ -175,6 +174,7 @@ def create_codeql_database(scan_path: str, language: str) -> str:
     logger.info(f"CodeQL database for {scan_path} with {language} created successfully.")
     return database_path
 
+
 def get_system_ram() -> int:
     """Get the system RAM in MB."""
     return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") // 1024 // 1024
@@ -189,7 +189,8 @@ def analyze_codeql_database(
     logger.info(f"Analyzing CodeQL database for {scan_path} with {language}...")
     result_output_path = f"{scan_path}/results-{language}.sarif"
     ram = get_system_ram()
-    command = f"codeql database analyze -q {database_path} codeql/{language}-queries --format=sarifv2.1.0 --output={result_output_path} --ram={int(ram * 0.85)}"
+    command = (f"codeql database analyze -q {database_path} codeql/{language}-queries "
+               f"--format=sarifv2.1.0 --output={result_output_path} --ram={int(ram * 0.85)}")
     logger.debug(f"Running command: {command}")
     result = subprocess.run(command, shell=True, cwd=scan_path)
     if result.returncode != 0:
@@ -198,9 +199,11 @@ def analyze_codeql_database(
     logger.info(f"CodeQL database for {scan_path} with {language} analyzed successfully.")
     return result_output_path
 
+
 def run_codeql_scanner(scan_path: str, language: str) -> list[Report]:
     """Run CodeQL on a given path with a given language."""
     from .models import ErrorReport
+    import shutil
 
     if language not in CODEQL_SUPPORTED_LANGUAGES:
         return [ErrorReport(
@@ -209,6 +212,9 @@ def run_codeql_scanner(scan_path: str, language: str) -> list[Report]:
         )]
 
     logger.info("Running CodeQL scanner...")
+    database_path = None
+    result_output_path = None
+
     try:
         download_codeql_pack(language)
     except RuntimeError:
@@ -230,18 +236,63 @@ def run_codeql_scanner(scan_path: str, language: str) -> list[Report]:
             result_output_path = analyze_codeql_database(scan_path, language, database_path)
     except RuntimeError:
         logger.error(f"Failed to analyze CodeQL database for {scan_path} with {language}.")
+        # Clean up database on analysis failure
+        if database_path and os.path.exists(database_path):
+            try:
+                shutil.rmtree(database_path, ignore_errors=True)
+                logger.info(f"Cleaned up CodeQL database after analysis failure: {database_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to clean up CodeQL database {database_path}: {cleanup_error}")
         return [ErrorReport(
             tool="CodeQL",
             reason=f"Failed to analyze CodeQL database for {scan_path} with {language}"
         )]
 
-    reports = parse_codeql_results(sarif_file_path=result_output_path)
+    try:
+        reports = parse_codeql_results(sarif_file_path=result_output_path)
 
-    # Set the correct language for all reports
-    for report in reports:
-        report.language = language
+        # Set the correct language for all reports
+        for report in reports:
+            report.language = language
 
-    return reports
+        # Clean up generated files after successful parsing
+        if database_path and os.path.exists(database_path):
+            try:
+                shutil.rmtree(database_path)
+                logger.info(f"Cleaned up CodeQL database: {database_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to clean up CodeQL database {database_path}: {cleanup_error}")
+
+        if result_output_path and os.path.exists(result_output_path):
+            try:
+                os.remove(result_output_path)
+                logger.info(f"Cleaned up CodeQL result file: {result_output_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to clean up CodeQL result file {result_output_path}: {cleanup_error}")
+
+        return reports
+
+    except Exception as e:
+        logger.error(f"Failed to parse CodeQL results: {e}")
+        # Clean up on parsing failure
+        if database_path and os.path.exists(database_path):
+            try:
+                shutil.rmtree(database_path)
+                logger.info(f"Cleaned up CodeQL database after parsing failure: {database_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to clean up CodeQL database {database_path}: {cleanup_error}")
+
+        if result_output_path and os.path.exists(result_output_path):
+            try:
+                os.remove(result_output_path)
+                logger.info(f"Cleaned up CodeQL result file after parsing failure: {result_output_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to clean up CodeQL result file {result_output_path}: {cleanup_error}")
+
+        return [ErrorReport(
+            tool="CodeQL",
+            reason=f"Failed to parse CodeQL results: {str(e)}"
+        )]
 
 
 def main():

@@ -3,6 +3,7 @@ Security scanners for the Agent Sentinel.
 """
 
 import os
+import glob
 import json
 import logging
 import re
@@ -175,10 +176,10 @@ def compare_path(path_1: str, path_2: str) -> bool:
     return norm_path1 == norm_path2
 
 async def comprehensive_security_scan_concurrent(
-    repo_url: str, 
-    paths: list[str] = [], 
-    branch_name: str = None, 
-    mode: Literal["full", "working", "staged", "unstaged"] = "full", 
+    repo_url: str,
+    paths: list[str] = [],
+    branch_name: str = None,
+    mode: Literal["full", "working", "staged", "unstaged"] = "full",
     deep: bool = True
 ) -> AsyncGenerator[Report | ErrorReport, None]:
 
@@ -187,7 +188,7 @@ async def comprehensive_security_scan_concurrent(
 
     if mode != 'full':
         logger.info(f"Scanning repository {repo_url} with mode {mode}; original paths ({paths}) is skipped")
-    
+
         diff: dict[str, Any] = await sync2async(scan_git_diff)(repo_path, mode=mode)
         diff_file_changes = diff.get("file_changes", [])
 
@@ -200,7 +201,7 @@ async def comprehensive_security_scan_concurrent(
 
     else:
         paths = [
-            os.path.join(repo_path, path) 
+            os.path.join(repo_path, path)
             for path in paths
         ]
 
@@ -299,7 +300,6 @@ def clean_file_path(file_path: str, repo_path: str) -> str:
         cleaned = file_path[len(repo_path):].lstrip('/')
         return cleaned if cleaned else file_path
     return file_path
-
 
 
 def scan_solidity_slither(scan_path: str) -> dict[str, Any]:

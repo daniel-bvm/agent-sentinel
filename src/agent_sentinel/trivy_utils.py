@@ -1,11 +1,9 @@
 import json_repair
-import json
 import logging
 import subprocess
 import os
 
 from .models import Report, SeverityLevel, ErrorReport
-import tempfile
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +15,7 @@ SEVERITY_MAPPING = {
     "LOW": SeverityLevel.LOW,
     "UNKNOWN": SeverityLevel.LOW
 }
+
 
 def _extract_dependency_information(vulnerability: dict) -> str | None:
     """
@@ -74,10 +73,7 @@ def _parse_trivy_report(report_path: str) -> list[Report]:
             # Get CWE mapping
             cwe = "CWE-1104"  # Use of Unmaintained Third Party Components (default for dependency vulns)
 
-            # Try to determine CWE from vulnerability details
-            vuln_title = vulnerability.get("Title", "").lower()
-            vuln_description = vulnerability.get("Description", "").lower()
-            combined_text = f"{vuln_title} {vuln_description}"
+            # CWE detection logic could be added here in the future
 
             # Enhanced description with context
             description_parts = []
@@ -99,7 +95,6 @@ def _parse_trivy_report(report_path: str) -> list[Report]:
             fixed_version = vulnerability.get("FixedVersion", "")
             if fixed_version:
                 description_parts.append(f"Fixed in: {fixed_version}")
-
 
             title = vulnerability.get("Title", "")
             if title:
@@ -212,6 +207,7 @@ def _parse_trivy_report(report_path: str) -> list[Report]:
 
 def scan_with_trivy(scan_path: str) -> list[Report]:
     """Scan the path with Trivy and return a list of Report objects."""
+    result_path = None
     try:
         result_path = _run_trivy_scan(scan_path)
         if result_path is None:
@@ -219,7 +215,14 @@ def scan_with_trivy(scan_path: str) -> list[Report]:
                 tool="Trivy",
                 reason="Error while running Trivy scan"
             )]
-        return _parse_trivy_report(result_path)
+        reports = _parse_trivy_report(result_path)
+
+        # Clean up the report file after parsing
+        if result_path and os.path.exists(result_path):
+            os.remove(result_path)
+            logger.info(f"Cleaned up Trivy report file: {result_path}")
+
+        return reports
     except FileNotFoundError:
         return [ErrorReport(
             tool="Trivy",
@@ -230,3 +233,11 @@ def scan_with_trivy(scan_path: str) -> list[Report]:
             tool="Trivy",
             reason=f"Trivy scan failed: {str(e)}"
         )]
+    finally:
+        # Ensure cleanup even if there's an exception
+        if result_path and os.path.exists(result_path):
+            try:
+                os.remove(result_path)
+                logger.info(f"Cleaned up Trivy report file in finally block: {result_path}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to clean up Trivy report file {result_path}: {cleanup_error}")
