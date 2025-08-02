@@ -1,29 +1,55 @@
 # Agent Sentinel - Security Analysis Agent
 
-Agent Sentinel is a comprehensive security analysis tool designed to identify vulnerabilities and security issues in GitHub repositories. It provides multiple scanning capabilities to ensure thorough security assessment.
+Agent Sentinel is a comprehensive security analysis tool designed to identify vulnerabilities and security issues in GitHub repositories. Built as a Model Context Protocol (MCP) server with FastAPI integration, it provides both programmatic access and streaming security analysis capabilities.
+
+## Architecture
+
+### MCP Servers
+- **Sentinel - Security Analysis Agent** (`mcp`): Git repository operations and file analysis
+- **Sentinel - Audit Agent** (`audit_mcp`): Security scanning and vulnerability detection
+- **Sentinel - Diff Analysis Agent** (`diff_mcp`): Git working tree analysis for live development workflow
+
+### FastAPI Server
+- RESTful API endpoints for chat-based interactions
+- Streaming responses for real-time security analysis
+- OpenAI-compatible tool integration
 
 ## Features
 
-### 🔍 Comprehensive Security Scanning
-- **Multi-language static analysis** using Semgrep
-- **Python security scanning** with Bandit
-- **Secret detection** using TruffleHog
-- **Dependency vulnerability scanning** with Safety
-- **Infrastructure security analysis** for Docker and CI/CD
-- **Automated security reporting**
+### 🔍 Git Repository Analysis
+- **Repository structure visualization** in tree format
+- **File content reading** from specific paths
+- **Directory exploration** at configurable depths
+- **Branch checkout** capabilities
+- **GitHub token management** and validation
 
-### 🛡️ Security Tools Integrated
+### 🛡️ Security Scanning Tools
+- **GitLeaks** - Secret detection in code and git history
 - **Bandit** - Python security linter
 - **Safety** - Python dependency vulnerability scanner
 - **Semgrep** - Multi-language static analysis
-- **TruffleHog** - Secret detection in code and git history
-- **Custom analyzers** for Docker and GitHub Actions
+- **Slither** - Solidity smart contract security analysis
+- **CodeQL** - Advanced static analysis for multiple languages
+- **Trivy** - Container and dependency vulnerability scanning
+- **npm audit** - JavaScript/Node.js dependency scanning
 
 ### 📊 Analysis Capabilities
-- Language detection and appropriate tool selection
-- Severity classification (Critical, High, Medium, Low)
-- Comprehensive security reports
-- Actionable remediation recommendations
+- **Concurrent scanning** for improved performance
+- **Language detection** and appropriate tool selection
+- **Severity classification** (Critical, High, Medium, Low, Warning, Error)
+- **CWE mapping** for vulnerability categorization
+- **Streaming results** as scans complete
+- **Error handling** and reporting
+
+### 🔄 Git Working Tree Analysis Features
+- **Live development workflow support** for Docker-mounted local repositories
+- **Efficient scanning** - only analyzes files that have actually changed
+- **Working tree scanning** shows all uncommitted changes (staged + unstaged)
+- **Staged changes analysis** for reviewing commits before they're made
+- **Unstaged changes detection** for tracking current work-in-progress
+- **Git status information** with categorized file states (modified, added, deleted, untracked)
+- **Path-specific analysis** for focusing on particular files or directories
+- **Real-time change tracking** as developers edit code in their local repository
 
 ## Installation
 
@@ -31,10 +57,35 @@ Agent Sentinel is a comprehensive security analysis tool designed to identify vu
 pip install -e .
 ```
 
+## Docker Usage
+
+The git working tree analysis tool is designed for live development workflow with Docker:
+
+```bash
+# Mount your local repository to the container
+docker run -v /path/to/your/repo:/app/repo your-image
+
+# As you edit files in your local repo, scan for changes:
+scan_git_diff("/app/repo", mode="working")        # All uncommitted changes
+scan_git_diff("/app/repo", mode="status")         # Git status overview
+scan_git_diff("/app/repo", "src/", mode="unstaged") # Unstaged changes in src/
+```
+
+**Development Workflow:**
+1. Mount your local git repository to the Docker container
+2. Edit code files directly in your local repository
+3. Use the tool to analyze your current working changes
+4. Get real-time insights into what you've modified before committing
+
 ## Configuration
 
 ### Environment Variables
-- `GITHUB_ACCESS_TOKEN` - Required GitHub personal access token
+- `GITHUB_ACCESS_TOKEN` - Required GitHub personal access token for private repositories
+- `LLM_API_KEY` - OpenAI API key for chat functionality
+- `LLM_BASE_URL` - LLM API endpoint (default: https://api.openai.com/v1)
+- `LLM_MODEL_ID` - Model identifier (default: gpt-4o-mini)
+- `HOST` - Server host (default: 0.0.0.0)
+- `PORT` - Server port (default: 80)
 
 ### MCP Configuration
 ```json
@@ -53,77 +104,138 @@ pip install -e .
 
 ## Usage
 
-### Available Tools
+### MCP Tools
 
-1. **comprehensive_security_scan(repo_url)** - Complete security analysis
-2. **scan_for_secrets(repo_url)** - Secret detection only
-3. **scan_dependencies_vulnerabilities(repo_url)** - Dependency vulnerability scan
-4. **scan_code_quality_security(repo_url)** - Static code analysis
-5. **scan_infrastructure_security(repo_url)** - Infrastructure security scan
-6. **generate_security_report(repo_url)** - Formatted security report
-
-### Example Usage
-
+#### Git Repository Tools
 ```python
-# Comprehensive security scan
-result = comprehensive_security_scan("https://github.com/user/repo")
+# Get repository directory structure
+git_directory_structure("https://github.com/user/repo", subfolder="src", max_depth=3)
 
-# Generate security report
-report = generate_security_report("https://github.com/user/repo")
+# Checkout a specific branch
+checkout_branch("/path/to/repo", "feature-branch")
+
+# Validate and set GitHub token
+validate_and_set_github_token("your-token-here")
+
+# Get token setup guide
+provide_guide_for_github_access_token()
 ```
+
+#### Security Scanning Tools
+```python
+# Comprehensive security scan (all tools)
+async for report in comprehensive_security_scan("https://github.com/user/repo"):
+    print(report)
+
+# Secret detection only
+async for report in scan_for_secrets("https://github.com/user/repo"):
+    print(report)
+
+# Dependency vulnerability scan
+async for report in scan_dependencies_vulnerabilities("https://github.com/user/repo"):
+    print(report)
+
+# Static code analysis
+async for report in scan_code_quality_security("https://github.com/user/repo"):
+    print(report)
+```
+
+#### Git Working Tree Analysis Tool
+```python
+# Show all working tree changes vs HEAD (staged + unstaged)
+scan_git_diff("/app/repo", mode="working")
+
+# Show working tree changes for specific path
+scan_git_diff("/app/repo", "src/main.py", mode="working")
+
+# Show only staged changes ready for commit
+scan_git_diff("/app/repo", mode="staged")
+
+# Show only unstaged changes in working directory
+scan_git_diff("/app/repo", "src/", mode="unstaged")
+
+# Get git status information (modified, added, deleted files)
+scan_git_diff("/app/repo", mode="status")
+```
+
+### FastAPI Server
+
+Start the server:
+```bash
+python server.py
+```
+
+The server provides:
+- `/prompt` - Chat completion endpoint with tool calling
+- `/health` - Health check endpoint
+- OpenAI-compatible streaming responses
 
 ## Security Checks Performed
 
 ### Code Security
+- **Python**: Bandit security linter, Safety dependency scanner
+- **JavaScript/TypeScript**: Semgrep analysis, npm audit
+- **Solidity**: Slither smart contract analysis
+- **Multi-language**: Semgrep rules, CodeQL analysis
+
+### Vulnerability Types Detected
 - SQL injection vulnerabilities
 - Cross-site scripting (XSS)
 - Command injection
 - Path traversal
 - Cryptographic issues
 - Authentication/authorization flaws
-
-### Infrastructure Security
-- Docker security best practices
-- Container privilege escalation
-- GitHub Actions security
-- CI/CD pipeline vulnerabilities
-
-### Dependency Security
-- Known CVEs in dependencies
-- Outdated packages
-- Security advisories
-- License compliance
+- Hardcoded credentials and secrets
+- Insecure dependencies
+- Code quality issues
 
 ### Secret Detection
-- Hardcoded credentials
 - API keys and tokens
 - Database connection strings
-- SSH keys
-- Certificate files
+- SSH keys and certificates
+- Hardcoded passwords
+- Cloud service credentials (AWS, Azure, GCP)
+- GitHub tokens and similar
 
 ## Supported Languages
 
-- **Python** - Bandit, Safety, pip-audit
-- **JavaScript/TypeScript** - Semgrep
-- **Java** - Semgrep
-- **C/C++** - Semgrep
-- **Go** - Semgrep
-- **Multi-language** - Semgrep, TruffleHog
+- **Python** - Bandit, Safety, pip-audit, Semgrep, CodeQL
+- **JavaScript/TypeScript** - npm audit, Semgrep, CodeQL
+- **Solidity** - Slither, Semgrep
+- **Java, C/C++, Go, C#** - Semgrep, CodeQL
+- **Multi-language** - GitLeaks secret detection
 
-## Security Report Output
+## Report Structure
 
-The agent generates comprehensive security reports including:
-- Executive summary with issue counts
-- Detailed findings by category
-- Severity classifications
-- Remediation recommendations
-- Best practice guidelines
+Security reports include:
+- **Tool identification** - Which scanner found the issue
+- **Severity level** - Critical, High, Medium, Low classification
+- **File location** - Exact file path and line numbers
+- **CWE mapping** - Common Weakness Enumeration identifiers
+- **Detailed descriptions** - Issue explanation and context
+- **Language detection** - Programming language context
 
 ## Dependencies
 
+### Core Dependencies
 - Python 3.8+
-- Git
-- Security scanning tools (installed automatically)
+- FastMCP 2.9.2
+- GitPython 3.0.6
+- FastAPI
+- Uvicorn
+
+### Security Tools
+- bandit[toml]==1.8.6
+- safety==3.4.0
+- semgrep==1.86.0
+- detect-secrets==1.5.0
+- pip-audit==2.9.0
+- slither-analyzer==0.11.3
+
+### Additional Tools
+- GitLeaks (external binary)
+- CodeQL (external binary)
+- Trivy (external binary)
 
 ## GitHub Token Setup
 
@@ -133,74 +245,18 @@ To obtain a GitHub Personal Access Token:
 3. Select 'repo' scope for full repository access
 4. Copy the token and set it as `GITHUB_ACCESS_TOKEN` environment variable
 
+Use the `provide_guide_for_github_access_token()` tool for detailed instructions.
+
+## Error Handling
+
+The system includes comprehensive error handling:
+- **ErrorReport objects** for scan failures
+- **Tool-specific error codes** for debugging
+- **Graceful degradation** when tools are unavailable
+- **Detailed error messages** with remediation suggestions
+
 ## License
 
 MIT License
-
-Let me break down how this code technically works:
-
-1. Purpose:
-The `mcp-git-ingest` is a Model Context Protocol (MCP) server designed to help read GitHub repository structures and important files. It provides two main tools:
-- `github_directory_structure`: Returns a tree-like representation of a repository's directory structure
-- `github_read_important_files`: Reads and returns the contents of specified files in a repository
-
-2. Technical Implementation:
-
-a. Dependencies:
-- Uses `fastmcp` for creating an MCP server
-- Uses `gitpython` for Git repository operations
-- Requires Python 3.8+
-
-b. Key Functions:
-
-`clone_repo(repo_url: str) -> str`:
-- Creates a deterministic temporary directory based on the repository URL's hash
-- Checks if the repository is already cloned
-- If not, clones the repository
-- Handles error cases and cleanup
-- Returns the path to the cloned repository
-
-`get_directory_tree(path: str, prefix: str = "") -> str`:
-- Recursively generates a tree-like directory structure
-- Skips `.git` directories
-- Uses Unicode box-drawing characters to create a visual tree representation
-- Handles sorting of entries
-
-`github_directory_structure(repo_url: str) -> str`:
-- Clones the repository
-- Generates directory tree
-- Cleans up the temporary repository after processing
-- Returns the tree structure or an error message
-
-`github_read_important_files(repo_url: str, file_paths: List[str]) -> dict[str, str]`:
-- Clones the repository
-- Reads specified files
-- Returns a dictionary mapping file paths to their contents
-- Handles file reading errors
-- Cleans up the temporary repository
-
-3. Error Handling:
-- Uses try-except blocks to handle repository cloning, file reading errors
-- Ensures temporary directories are always cleaned up using `finally` blocks
-- Returns descriptive error messages
-
-4. Performance Optimizations:
-- Uses a hash-based temporary directory naming to potentially reuse cloned repositories
-- Checks for existing repositories before cloning
-- Implements cleanup to prevent accumulation of temporary files
-
-5. Unique Features:
-- Deterministic temporary directory creation
-- Unicode tree representation
-- Flexible file reading with error handling
-
-6. Execution:
-- Can be run as a CLI tool via `mcp-git-ingest`
-- Configured through `pyproject.toml`
-- Depends on `fastmcp` for MCP server functionality
-
-The code is a robust, flexible tool for programmatically exploring and reading GitHub repositories, with a focus on error handling and clean implementation.
-
-Would you like me to elaborate on any specific aspect of the implementation?
 ```
 

@@ -1,67 +1,14 @@
-FROM nikolasigmoid/py-mcp-proxy:latest
+FROM danieltn11/sentinel-base-image:latest
 
-# --- Install dependencies ---
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    curl \
-    gnupg \
-    unzip \
-    ca-certificates \
-    tar \
-    wget \
-    python3-pip \
-    openjdk-17-jdk \
-    nodejs \
-    npm \
-    jq \
-    procps \
-    xz-utils \
-    golang \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# --- Java config ---
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-ENV PATH="$JAVA_HOME/bin:$PATH"
-
-# --- Install Gitleaks (latest release) ---
-RUN export GITLEAKS_VERSION=$(curl -s "https://api.github.com/repos/gitleaks/gitleaks/releases/latest" \
-    | grep -Po '"tag_name": "v\K[0-9.]+') && \
-    wget -qO gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz && \
-    tar -xzf gitleaks.tar.gz && \
-    mv gitleaks /usr/local/bin/gitleaks && \
-    chmod +x /usr/local/bin/gitleaks && \
-    rm gitleaks.tar.gz
-
-# --- Install Foundry ---
-# Note: This command runs a script that installs Foundry to /root/.foundry
-# and adds it to the PATH.
-RUN curl -L https://foundry.paradigm.xyz | bash && \
-    /root/.foundry/bin/foundryup
-ENV PATH="/root/.foundry/bin:$PATH"
-
-# --- Install Slither ---
-RUN pip install slither-analyzer requests
-
-# --- Install CodeQL CLI ---
-ENV CODEQL_VERSION="2.22.1"
-RUN curl -L -o codeql.zip https://github.com/github/codeql-cli-binaries/releases/download/v${CODEQL_VERSION}/codeql-linux64.zip && \
-    unzip codeql.zip -d /opt/codeql-temp && \
-    mv /opt/codeql-temp/codeql /opt/codeql && \
-    ln -s /opt/codeql/codeql /usr/local/bin/codeql && \
-    rm codeql.zip && \
-    rm -r /opt/codeql-temp
-
-# --- Install Trivy ---
-RUN wget https://github.com/aquasecurity/trivy/releases/download/v0.20.2/trivy_0.20.2_Linux-64bit.deb && \
-    dpkg -i trivy_0.20.2_Linux-64bit.deb && \
-    rm trivy_0.20.2_Linux-64bit.deb
-
-WORKDIR /app
+WORKDIR /workspace
 
 COPY pyproject.toml pyproject.toml
 COPY src src
+RUN pip install . --no-cache-dir && rm -f pyproject.toml
+
 COPY config.json config.json
 COPY system_prompt.txt system_prompt.txt
+COPY server.py server.py
+COPY app app
 
-RUN pip install . && rm -f pyproject.toml
+CMD ["python", "server.py"]
