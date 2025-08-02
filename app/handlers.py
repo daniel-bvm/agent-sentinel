@@ -212,6 +212,16 @@ def is_match(report_1: Report, report_2: Report) -> bool:
     )
 
 import base64
+from mimetypes import guess_type
+
+def create_data_uri(file_path: str) -> str:
+    with open(file_path, "rb") as f:
+        file_bytes = f.read()
+
+    encoded_data = base64.b64encode(file_bytes).decode("utf-8")
+    mime_type = guess_type(file_path)[0] or "application/octet-stream"
+    return f"data:{mime_type};base64,{encoded_data}"
+
 def construct_file_response(file_paths: list[str]) -> str:
     files_xml = ""
 
@@ -225,10 +235,11 @@ def construct_file_response(file_paths: list[str]) -> str:
 
             encoded_data = base64.b64encode(file_bytes).decode("utf-8")
             filename = os.path.basename(file_path)
+            data_uri = create_data_uri(file_path)
             files_xml += (
                 f"  <file>\n"
                 f"    <filename>{filename}</filename>\n"
-                f"    <filedata>{encoded_data}</filedata>\n"
+                f"    <filedata>{data_uri}</filedata>\n"
                 f"  </file>\n"
             )
         except Exception as e:
