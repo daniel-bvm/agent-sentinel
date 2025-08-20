@@ -207,3 +207,4 @@ src/tests/
 mydb/
 security_scan_results.txt
 flattened/
+logs/

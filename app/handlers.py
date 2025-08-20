@@ -477,11 +477,11 @@ def generate_chart_markdown(df: DataFrame, chart_type: str, x_axis: str, y_axis:
         return f"Error generating chart: {str(e)}"
 
 async def generate_headline(
-    df: DataFrame, 
-    repo: RepoInfo | None, 
-    arm: AgentResourceManager, 
-    event: asyncio.Event, 
-    user_message: str, 
+    df: DataFrame,
+    repo: RepoInfo | None,
+    arm: AgentResourceManager,
+    event: asyncio.Event,
+    user_message: str,
     notifications: list[str] = []
 ) -> AsyncGenerator[ChatCompletionStreamResponse | ErrorResponse, None]:
     """Generate executive summary and overview of the security scan results."""
@@ -685,10 +685,10 @@ async def generate_other_severity_report(
         yield wrap_chunk(random_uuid(), "\n### 💡 Next Steps\n\n", "assistant")
 
         async for chunk in _generate_low_priority_recommendations(
-            other_df, 
-            repo, 
-            arm, 
-            event, 
+            other_df,
+            repo,
+            arm,
+            event,
             user_message,
             system_noti
         ):
@@ -844,6 +844,7 @@ async def _generate_cwe_detailed_analysis(
         )
 
         github_link = repo.get_reference(report['file_path'], line_start, line_end)
+        logger.info(f"Github link: {github_link}")
         yield wrap_chunk(random_uuid(), f"**Issue {idx + 1}:** [{report['file_path']}{line_info}]({github_link})\n", "assistant")
         yield wrap_chunk(random_uuid(), f"- **Tool:** {report['tool']}\n", "assistant")
         yield wrap_chunk(random_uuid(), f"- **Severity:** {report['severity']}\n", "assistant")
@@ -944,7 +945,7 @@ Keep your response focused, practical, and include code examples where relevant.
             yield chunk
 
     yield wrap_chunk(random_uuid(), "\n---\n\n", "assistant")
-    
+
 def to_df(confirmed_reports: list[Report]) -> DataFrame:
     report_list = [
         {
@@ -1023,14 +1024,14 @@ async def handoff(
     deep_mode = tool_args.get('deep', True)
     repo_url: str | None = tool_args.get('github_repo', None)
     tool_args.setdefault('paths', [])
-    
+
     if not isinstance(tool_args['paths'], list):
         logger.warning(f"Paths is not a list, converting to list: {tool_args['paths']}")
-        
+
         if not isinstance(tool_args['paths'], str):
             logger.warning(f"Paths is not a string: {tool_args['paths']} (ignoring)")
             tool_args['paths'] = []
-        
+
         else:
             tool_args['paths'] = [tool_args['paths']]
 
@@ -1119,8 +1120,8 @@ async def handoff(
     ):
         noti = "{tool} did not find any vulnerabilities.".format(
             tool=", ".join(
-                tool 
-                for tool in executed_tools 
+                tool
+                for tool in executed_tools
                 if tool not in tools_w_confirmed_reports
             )
         )
@@ -1131,22 +1132,22 @@ async def handoff(
     yield FullyHandoff()
 
     async for chunk in generate_security_deep_report(
-        confirmed_reports, 
-        arm, 
-        event, 
-        repo, 
-        deep_mode, 
+        confirmed_reports,
+        arm,
+        event,
+        repo,
+        deep_mode,
         user_message,
         notifications[-5:]
     ):
         yield chunk
- 
+
         if isinstance(chunk, ChatCompletionStreamResponse):
             detail_report += chunk.choices[0].delta.content or ''
 
     pdf.add_component(PdfMarkDownBody(detail_report))
     html = pdf.to_html()
-    
+
     timestamp = datetime.datetime.now(tz=datetime.timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
     tempdir = f"/tmp/sentinel-report/{timestamp}"
 
@@ -1158,23 +1159,23 @@ async def handoff(
 
         df = to_df(confirmed_reports)
         filtered_df = df[[
-            "tool", 
-            "severity", 
+            "tool",
+            "severity",
             "description",
-            "file_path", 
-            "line_start", 
-            "line_end", 
-            "language", 
-            "cwe", 
-            "cve", 
+            "file_path",
+            "line_start",
+            "line_end",
+            "language",
+            "cwe",
+            "cve",
             "information"
         ]]
-        
+
         # save the filtered_df to a csv file
         filtered_df.to_csv(f"{tempdir}/report.csv", index=False)
         yield wrap_chunk(
-            random_uuid(), 
-            construct_file_response([f'{tempdir}/report.html', f'{tempdir}/report.csv']), 
+            random_uuid(),
+            construct_file_response([f'{tempdir}/report.html', f'{tempdir}/report.csv']),
             "assistant"
         )
 
@@ -1222,25 +1223,25 @@ async def handle_request(
 
     oai_tools = [
         {
-            'type': 'function', 
+            'type': 'function',
             'function': {
-                'name': 'security_scan', 
-                'description': 'Perform a comprehensive security scan of a GitHub repository and get the report. Can scan a specific subfolder or individual file within the repository.', 
+                'name': 'security_scan',
+                'description': 'Perform a comprehensive security scan of a GitHub repository and get the report. Can scan a specific subfolder or individual file within the repository.',
                 'parameters': {
                     'properties': {
                         'github_repo': {
                             'title': 'Github repository to scan. It can be local path or github url.', 'type': 'string'
-                        }, 
+                        },
                         'paths': {
-                            'default': [], 
-                            'items': {'type': 'string'}, 
-                            'title': 'Specific paths to scan. By default, all detected files/folders are scanned.', 
+                            'default': [],
+                            'items': {'type': 'string'},
+                            'title': 'Specific paths to scan. By default, all detected files/folders are scanned.',
                             'type': 'array'
-                        }, 
-                        'branch_name': {'anyOf': [{'type': 'string'}, {'type': 'null'}], 'default': None, 'title': 'Specify the branch to scan. Use None as default branch.'}, 
-                        'mode': {'default': 'full', 'enum': ['working', 'full'], 'title': 'The mode to scan the repository in. \'full\' mode scans all files/folders, \'working\' scans only the working tree changes. For quick scans, use working mode', 'type': 'string'}, 
+                        },
+                        'branch_name': {'anyOf': [{'type': 'string'}, {'type': 'null'}], 'default': None, 'title': 'Specify the branch to scan. Use None as default branch.'},
+                        'mode': {'default': 'full', 'enum': ['working', 'full'], 'title': 'The mode to scan the repository in. \'full\' mode scans all files/folders, \'working\' scans only the working tree changes. For quick scans, use working mode', 'type': 'string'},
                         'deep': {'default': True, 'title': 'Perform extra scans on the source code. Deep mode takes more time to run.', 'type': 'boolean'}
-                    }, 
+                    },
                     'required': ['github_repo'], 'type': 'object'
                 }
             }
@@ -1253,7 +1254,7 @@ async def handle_request(
     user_messages = get_user_messages(messages, last_n=3)
 
     user_message = ''
-    
+
     for message in user_messages:
         lines = message.split('\n')
 
