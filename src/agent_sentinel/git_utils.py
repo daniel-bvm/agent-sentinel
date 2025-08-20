@@ -19,12 +19,12 @@ def detect_github_repo(path: str) -> tuple[str, str | None]:
     for i in reversed(list(range(len(parts) + 1))):
         if os.path.exists(os.path.join(*parts[:i], ".git")):
             return (
-                os.path.join(*parts[:i]), 
+                os.path.join(*parts[:i]),
                 os.path.join(*parts[i:]) if i < len(parts) else None
             )
 
     return None, None
-    
+
 def prepare_repo(path: str, branch_name: str | None = None, remove_on_error: bool = False, pull: bool = True) -> str:
     repo = git.Repo(path)
 
@@ -221,10 +221,10 @@ def git_directory_structure(repo_url: str, subfolder: str = "", max_depth: int =
 
 class RepoInfo:
     DEFAULT_REMOTE_NAME = 'origin'
-    
+
     def get_remote_safe(self) -> str | None:
         try:
-            self.repo.remote(self.DEFAULT_REMOTE_NAME).url
+            return self.repo.remote(self.DEFAULT_REMOTE_NAME).url
         except Exception as e:
             logger.warning(f"Error getting remote URL: {e}")
             return None
@@ -251,6 +251,7 @@ class RepoInfo:
         return f"RepoInfo(repo_url={self.repo_url}, repo_path={self.repo_path}, branch={self.branch}{context}{file_type})"
 
     def get_reference(self, file: str, line_start: str | int | None = None, line_end: str | int | None = None) -> str:
+        logger.info(f"Repo URL: {self.repo_url}")
         pref = f"{self.repo_url}/blob/{self.branch}/" if self.repo_url else ""
 
         if line_start is not None and line_end is None:

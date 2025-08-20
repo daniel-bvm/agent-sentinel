@@ -26,7 +26,7 @@ diff_mcp = FastMCP("Sentinel - Diff Analysis Agent", dependencies=["gitpython"])
     }
 )
 async def security_scan(
-    github_repo: str, 
+    github_repo: str,
     paths: list[str] = [],
     branch_name: str | None = None,
     mode: Literal["working", "full"] = "full",
@@ -40,10 +40,11 @@ async def security_scan(
     logger.info(f"Scanning repository {github_repo} with target path {paths} and branch name {branch_name} and deep mode {deep}")
 
     async for report in security_scanners.comprehensive_security_scan_concurrent(
-        github_repo, 
+        github_repo,
         paths,
-        branch_name if not is_remote_url else None, 
-        mode, 
+        branch_name if not is_remote_url else None,
+        mode,
         deep if not is_remote_url else None
     ):
         yield report
+
