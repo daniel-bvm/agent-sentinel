@@ -1,5 +1,10 @@
 FROM python:3.10-slim
 
+# Let Buildx pass architecture info
+ARG TARGETARCH
+ENV TARGETARCH=${TARGETARCH}
+ENV DEBIAN_FRONTEND=noninteractive
+
 # --- Install dependencies ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
@@ -17,39 +22,85 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     xz-utils \
     golang \
-    build-essential
+    build-essential \
+    python3-distutils \
+ && rm -rf /var/lib/apt/lists/*
 
-# --- Java config ---
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-ENV PATH="$JAVA_HOME/bin:$PATH"
+# --- Set JAVA_HOME based on architecture ---
+ENV JAVA_HOME_AMD64=/usr/lib/jvm/java-17-openjdk-amd64
+ENV JAVA_HOME_ARM64=/usr/lib/jvm/java-17-openjdk-arm64
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+        export JAVA_HOME=$JAVA_HOME_AMD64; \
+    else \
+        export JAVA_HOME=$JAVA_HOME_ARM64; \
+    fi && \
+    echo "JAVA_HOME=$JAVA_HOME" >> /etc/environment && \
+    echo "export JAVA_HOME=$JAVA_HOME" >> /etc/profile && \
+    echo "export PATH=\$JAVA_HOME/bin:\$PATH" >> /etc/profile
+ENV PATH="${JAVA_HOME_AMD64}/bin:${JAVA_HOME_ARM64}/bin:$PATH"
 
-# --- Install Gitleaks (latest release) ---
-RUN export GITLEAKS_VERSION=$(curl -s "https://api.github.com/repos/gitleaks/gitleaks/releases/latest" \
-    | grep -Po '"tag_name": "v\K[0-9.]+') \
-    && wget -qO gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz \
-    && tar -xzf gitleaks.tar.gz \
-    && mv gitleaks /usr/local/bin/gitleaks \
-    && chmod +x /usr/local/bin/gitleaks \
-    && rm gitleaks.tar.gz \
-    && curl -L https://foundry.paradigm.xyz | bash \
-    && /root/.foundry/bin/foundryup
+# --- Install Gitleaks (multi-arch) ---
+RUN apt-get update
+RUN apt-get install -y --no-install-recommends perl
+RUN curl -s -H "Accept: application/vnd.github.v3+json" \
+    "https://api.github.com/repos/gitleaks/gitleaks/releases/latest" \
+    | jq -r '.tag_name | ltrimstr("v")' > /tmp/GITLEAKS_VERSION
+RUN if [ ! -s /tmp/GITLEAKS_VERSION ]; then echo "Failed to fetch Gitleaks version"; exit 1; fi
+RUN GITLEAKS_VERSION=$(cat /tmp/GITLEAKS_VERSION) && \
+    if [ "$TARGETARCH" = "amd64" ]; then GITLEAKS_ARCH="x64"; else GITLEAKS_ARCH="$TARGETARCH"; fi && \
+    wget -qO /tmp/gitleaks.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz
+RUN tar -xzf /tmp/gitleaks.tar.gz -C /tmp
+RUN mv /tmp/gitleaks /usr/local/bin/gitleaks
+RUN chmod +x /usr/local/bin/gitleaks
+RUN rm /tmp/gitleaks.tar.gz
 
+# --- Install Foundry (auto-detect arch) - before removing git ---
+RUN curl -L https://foundry.paradigm.xyz | bash && /root/.foundry/bin/foundryup
 ENV PATH="/root/.foundry/bin:$PATH"
+
+# --- Clean up perl and other packages ---
+RUN apt-get purge -y perl
+RUN rm -rf /var/lib/apt/lists/*
+
+# --- Install Slither, Mythril ---
+# Upgrade pip first to avoid compatibility issues
+RUN pip install --upgrade pip setuptools wheel
+# Install packages with proper dependency handling
+RUN pip install --no-cache-dir slither-analyzer requests
+# Install mythril with specific numpy compatibility
+RUN pip install --no-cache-dir "mythril>=0.23.0" --no-deps
+RUN pip install --no-cache-dir \
+    "numpy>=1.20.0" \
+    "eth-hash>=0.3.1" \
+    "eth-utils>=2.0.0" \
+    "web3>=6.0.0" \
+    "coloredlogs>=10.0" \
+    "jinja2>=2.9" \
+    "coverage>=6.0" \
+    "z3-solver>=4.8.8.0"
+
+# --- Install CodeQL (multi-arch with fallback) ---
 ENV CODEQL_VERSION="2.22.1"
+# CodeQL does not support ARM64 yet
+# https://github.com/github/codeql-cli-binaries/issues/97
+RUN if [ "$TARGETARCH" = "amd64" ]; then \
+        echo "Installing CodeQL for amd64" && \
+        curl -L -o codeql.zip "https://github.com/github/codeql-cli-binaries/releases/download/v${CODEQL_VERSION}/codeql-linux64.zip" && \
+        unzip codeql.zip -d /opt/codeql-temp && \
+        mv /opt/codeql-temp/codeql /opt/codeql && \
+        ln -s /opt/codeql/codeql /usr/local/bin/codeql && \
+        rm codeql.zip && \
+        rm -r /opt/codeql-temp; \
+    else \
+        echo "Skipping CodeQL for ARM64 - not natively supported, using placeholder" && \
+        mkdir -p /opt/codeql/bin && \
+        echo '#!/bin/bash\necho "CodeQL not available for ARM64 architecture"\nexit 1' > /opt/codeql/bin/codeql && \
+        chmod +x /opt/codeql/bin/codeql && \
+        ln -s /opt/codeql/bin/codeql /usr/local/bin/codeql; \
+    fi
 
+# --- Install Trivy ---
 COPY install_trivy.sh /tmp/install_trivy.sh
+RUN chmod +x /tmp/install_trivy.sh && /tmp/install_trivy.sh
 
-# --- Install Slither ---
-# Install dependencies required for mythril (including distutils)
-RUN apt-get install -y python3-distutils \
-    && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir slither-analyzer requests \
-    && pip install --no-cache-dir mythril \
-    && curl -L -o codeql.zip https://github.com/github/codeql-cli-binaries/releases/download/v${CODEQL_VERSION}/codeql-linux64.zip \
-    && unzip codeql.zip -d /opt/codeql-temp \
-    && mv /opt/codeql-temp/codeql /opt/codeql \
-    && ln -s /opt/codeql/codeql /usr/local/bin/codeql \
-    && rm codeql.zip \
-    && rm -r /opt/codeql-temp \
-    && chmod +x /tmp/install_trivy.sh \
-    && /tmp/install_trivy.sh
+CMD ["bash"]
