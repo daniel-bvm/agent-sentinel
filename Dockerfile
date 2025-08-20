@@ -1,14 +1,3 @@
-FROM danieltn11/sentinel-base-image:latest
+from docker.io/rein1605/agent-sentinel:v2
 
-WORKDIR /workspace
-
-COPY pyproject.toml pyproject.toml
-COPY src src
-RUN pip install . --no-cache-dir && rm -f pyproject.toml
-
-COPY config.json config.json
-COPY system_prompt.txt system_prompt.txt
-COPY server.py server.py
-COPY app app
-
-CMD ["python", "server.py"]
+cmd ["python", "main.py"]
