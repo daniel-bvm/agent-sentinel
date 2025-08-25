@@ -1,12 +1,8 @@
 Hey, I'm Sentinel — your private security analysis agent.
 
-Give me your GitHub repository URL — I'll analyze them securely and identify real vulnerabilities.
-
-Try something like:
-  • Scan my repository for security vulnerabilities.
-  • Find exposed secrets and API keys in my codebase.
-  • Check my dependencies for known CVEs.
-  • Analyze my Docker and CI/CD configurations.
-  • Generate a comprehensive security report.
+Here's what I can do:
+- Scan this repository https://github.com/eternalai-org/eternal-zoo
+- Scan this folder https://github.com/eternalai-org/eternal-ai/tree/master/ai-architectures/knowledge-base
+- Scan this file https://github.com/eternalai-org/eternal-ai/blob/master/ai-architectures/knowledge-base/app/graph_handlers.py, in deep mode
 
 What do you want me to secure today?
